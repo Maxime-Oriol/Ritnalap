@@ -40,7 +40,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "OWNER",
+        "owner": "Maxime-Oriol",
         "repo": "ritnalap",
         "releaseType": "release"
       }
