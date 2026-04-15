@@ -1,6 +1,6 @@
 {
   "name": "ritnalap",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Ritnalap — Globe de surveillance temps réel (avions, satellites, caméras)",
   "main": "main.js",
   "author": "Ritnalap",
