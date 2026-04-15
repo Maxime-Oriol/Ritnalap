@@ -10,9 +10,15 @@
     "build:win": "electron-builder --win",
     "build:win-portable": "electron-builder --win portable",
     "build:win-installer": "electron-builder --win nsis",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux",
+    "build:all": "electron-builder --win --mac --linux",
     "version:patch": "npm version patch -m \"chore(release): v%s\"",
     "version:minor": "npm version minor -m \"chore(release): v%s\"",
     "version:major": "npm version major -m \"chore(release): v%s\""
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.3"
   },
   "devDependencies": {
     "electron": "^32.2.0",
@@ -31,12 +37,71 @@
       "index.html",
       "package.json"
     ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "OWNER",
+        "repo": "ritnalap",
+        "releaseType": "release"
+      }
+    ],
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "build/icon.ico"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "build/icon.icns",
+      "category": "public.app-category.utilities",
+      "hardenedRuntime": false
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "category": "Utility"
+    },
+    "dmg": {
+      "artifactName": "Ritnalap-${version}-mac.dmg"
+    },
+    "appImage": {
+      "artifactName": "Ritnalap-${version}.AppImage"
+    },
+    "deb": {
+      "artifactName": "ritnalap_${version}_amd64.deb"
     },
     "nsis": {
       "oneClick": false,

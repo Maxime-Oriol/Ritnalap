@@ -1,9 +1,10 @@
 // ============================================================
 // Ritnalap — Electron main process
 // ============================================================
-const { app, BrowserWindow, ipcMain, safeStorage, session, Menu, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, safeStorage, session, Menu, shell, dialog } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const { autoUpdater } = require("electron-updater");
 
 const CONFIG_PATH = () => path.join(app.getPath("userData"), "config.json");
 
@@ -133,7 +134,46 @@ ipcMain.handle("config:path", () => CONFIG_PATH());
 ipcMain.handle("app:version", () => app.getVersion());
 ipcMain.handle("app:name", () => app.getName());
 
-app.whenReady().then(createWindow);
+// -- Auto-updater (GitHub Releases) --
+// Vérifie au démarrage s'il y a une nouvelle release sur GitHub.
+// Si oui, télécharge en arrière-plan et propose de redémarrer.
+autoUpdater.autoDownload = true;
+autoUpdater.autoInstallOnAppQuit = true;
+autoUpdater.logger = console;
+
+autoUpdater.on("update-available", (info) => {
+  console.log("Mise à jour disponible :", info.version);
+});
+
+autoUpdater.on("update-downloaded", (info) => {
+  // On laisse l'utilisateur choisir quand redémarrer
+  const win = BrowserWindow.getFocusedWindow();
+  if (win) {
+    dialog.showMessageBox(win, {
+      type: "info",
+      title: "Mise à jour prête",
+      message: `Ritnalap v${info.version} est téléchargé. Redémarrer maintenant ?`,
+      buttons: ["Redémarrer", "Plus tard"],
+      defaultId: 0,
+      cancelId: 1,
+    }).then(({ response }) => {
+      if (response === 0) autoUpdater.quitAndInstall();
+    });
+  }
+});
+
+autoUpdater.on("error", (err) => {
+  // Silencieux en cas d'erreur (pas de repo configuré, pas de réseau, etc.)
+  console.log("Auto-update error (non bloquant):", err?.message || err);
+});
+
+app.whenReady().then(() => {
+  createWindow();
+  // Vérifie les mises à jour après un court délai (laisse l'app se charger d'abord)
+  setTimeout(() => {
+    autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+  }, 5000);
+});
 
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();

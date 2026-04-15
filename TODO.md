@@ -34,10 +34,12 @@ Choses à faire pour parfaire l'app. Coche au fur et à mesure.
 - [ ] Mode offline : cacher les TLE CelesTrak en local pour fonctionner sans réseau
 
 ## Packaging
-- [ ] Générer `build/icon.ico` et `build/icon.png` depuis `build/logo.svg`
-- [ ] Signature Authenticode du `.exe` Windows (évite warning SmartScreen)
-- [ ] Auto-updater via GitHub Releases (`electron-updater`)
-- [ ] Build macOS (.dmg) et Linux (.AppImage) en plus du Windows
+- [x] Générer `build/icon.ico`, `build/icon.png` et `build/icon.icns` depuis `build/logo.svg`
+- [x] Auto-updater via GitHub Releases (`electron-updater`) — intégré dans `main.js`, vérifie au démarrage, dialogue de redémarrage
+- [x] Build macOS (.dmg arm64+x64) et Linux (.AppImage + .deb) — scripts `build:mac`, `build:linux`, `build:all` dans package.json
+- [ ] Signature Authenticode du `.exe` Windows — nécessite un certificat .pfx (DigiCert/Sectigo ~100€/an). Config : `CSC_LINK=cert.pfx CSC_KEY_PASSWORD=xxx npm run build:win`
+- [ ] Signature macOS (Developer ID) — nécessite un compte Apple Developer (99€/an). Activer `hardenedRuntime: true` + notarization dans electron-builder
+- [ ] Publier la première GitHub Release pour activer l'auto-updater. Penser à remplacer `"owner": "OWNER"` dans package.json par le vrai owner GitHub
 
 ## Dette / robustesse
 - [ ] Bundler Cesium + satellite.js + hls.js en local (vs jsDelivr) pour 100 % offline
