@@ -1,0 +1,2071 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Ritnalap — Globe de surveillance temps réel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <link href="https://cdn.jsdelivr.net/npm/cesium@1.118/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/cesium@1.118/Build/Cesium/Cesium.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/satellite.js@5.0.0/dist/satellite.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+
+  <style>
+    html, body, #cesiumContainer {
+      width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden;
+      background: #000;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #e6edf3;
+    }
+    #topbar {
+      position: absolute; top: 0; left: 0; right: 0;
+      background: linear-gradient(180deg, rgba(10,14,20,.95), rgba(10,14,20,.7));
+      padding: 10px 16px;
+      display: flex; align-items: center; gap: 12px;
+      z-index: 10;
+      border-bottom: 1px solid rgba(100,150,200,.2);
+      flex-wrap: wrap;
+    }
+    #topbar h1 { font-size: 16px; margin: 0; color: #4fb3ff; letter-spacing: 2px; font-weight: 600; }
+    /* Icônes Lucide */
+    .toggle [data-lucide], #settingsBtn [data-lucide], #autoRefreshBtn [data-lucide] {
+      width: 16px; height: 16px; flex-shrink: 0;
+    }
+    #settingsBtn [data-lucide], #autoRefreshBtn [data-lucide] { width: 18px; height: 18px; }
+    .sb-counts [data-lucide] { width: 13px; height: 13px; vertical-align: -2px; }
+    .toggle {
+      display: flex; align-items: center; gap: 6px;
+      background: rgba(30,40,55,.7);
+      padding: 6px 12px; border-radius: 20px;
+      cursor: pointer; font-size: 13px;
+      border: 1px solid rgba(100,150,200,.2);
+      user-select: none;
+    }
+    .toggle.active { background: rgba(40,90,160,.5); border-color: #4fb3ff; }
+    .toggle input { margin: 0; }
+    .count { opacity: 0.6; font-size: 11px; }
+    #status { margin-left: auto; font-size: 11px; opacity: 0.6; }
+    #settingsBtn, #autoRefreshBtn {
+      background: rgba(30,40,55,.7);
+      border: 1px solid rgba(100,150,200,.2);
+      color: #e6edf3; cursor: pointer;
+      padding: 8px 14px; border-radius: 20px;
+      font-size: 14px;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    #settingsBtn:hover, #autoRefreshBtn:hover { background: rgba(40,90,160,.5); }
+    #autoRefreshBtn { background: rgba(40,90,160,.5); border-color: #4fb3ff; }
+    #autoRefreshBtn.paused { background: rgba(80,40,40,.5); border-color: #ff7b7b; color: #ffb3b3; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #infoPanel {
+      position: absolute; top: 60px; right: 16px; width: 360px;
+      max-height: calc(100vh - 80px); overflow-y: auto;
+      background: rgba(10,14,20,.92);
+      border: 1px solid rgba(100,150,200,.3);
+      border-radius: 8px; padding: 16px;
+      display: none; z-index: 9;
+      backdrop-filter: blur(10px);
+    }
+    #infoPanel h2 { margin: 0 0 10px; font-size: 15px; color: #4fb3ff; }
+    #infoPanel .row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; border-bottom: 1px solid rgba(100,150,200,.1); }
+    #infoPanel .row .label { opacity: 0.6; }
+    #infoPanel video { width: 100%; margin-top: 10px; border-radius: 4px; background:#000; }
+    #closeBtn { float: right; cursor: pointer; opacity: 0.6; }
+    #closeBtn:hover { opacity: 1; }
+    .cesium-viewer-bottom { display: none !important; }
+
+    /* Logo */
+    .logo-svg { width: 28px; height: 28px; flex-shrink: 0; }
+
+    /* Status bar bottom */
+    #statusBar {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      background: linear-gradient(0deg, rgba(10,14,20,.95), rgba(10,14,20,.8));
+      border-top: 1px solid rgba(100,150,200,.25);
+      padding: 6px 12px; display: flex; align-items: center; gap: 14px;
+      font-size: 11px; z-index: 6; backdrop-filter: blur(8px);
+      height: 32px; box-sizing: border-box;
+    }
+    #statusBar .sb-logo { width: 20px; height: 20px; }
+    #statusBar .sb-name { color: #4fb3ff; font-weight: 600; letter-spacing: 1.5px; }
+    #statusBar .sb-version { opacity: 0.6; font-family: monospace; }
+    #statusBar .sb-sep { opacity: 0.3; }
+    #statusBar .sb-spacer { flex: 1; }
+    #statusBar .sb-alert {
+      display: flex; align-items: center; gap: 5px;
+      padding: 3px 10px; border-radius: 12px;
+      background: rgba(60,30,30,.6); color: #ffb3b3;
+      border: 1px solid rgba(255,100,100,.3);
+    }
+    #statusBar .sb-alert.ok { background: rgba(30,60,40,.5); color: #8affa0; border-color: rgba(100,200,120,.3); }
+    #statusBar .sb-alert.warn { background: rgba(60,50,20,.6); color: #ffe08a; border-color: rgba(220,180,80,.3); }
+    #statusBar .sb-alert.clickable { cursor: pointer; }
+    #statusBar .sb-alert.clickable:hover { filter: brightness(1.3); }
+    #statusBar .sb-counts { display: flex; gap: 10px; opacity: 0.7; }
+    #statusBar .sb-counts b { color: #4fb3ff; font-weight: 600; }
+
+    /* Popup détails sources */
+    #sourceSummary {
+      position: absolute; bottom: 38px; right: 10px;
+      background: rgba(10,14,20,.94);
+      border: 1px solid rgba(100,150,200,.3);
+      border-radius: 6px; padding: 10px 14px;
+      font-size: 11px; max-width: 380px; z-index: 7;
+      backdrop-filter: blur(8px);
+      display: none;
+    }
+    #sourceSummary.open { display: block; }
+    #sourceSummary h4 { margin: 0 0 8px; color: #4fb3ff; font-size: 11px; letter-spacing: 1px; }
+    #sourceSummary .sline { display: flex; gap: 8px; align-items: center; padding: 2px 0; }
+    #sourceSummary .sline .name { flex: 1; opacity: 0.85; }
+    #sourceSummary .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .dot.ok { background: #8affa0; }
+    .dot.err { background: #ff7b7b; }
+    .dot.off { background: #666; }
+    .dot.nokey { background: #d9a84e; }
+    .dot.pending { background: #4fb3ff; animation: pulse 1.2s infinite; }
+    @keyframes pulse { 50% { opacity: 0.3; } }
+
+    /* Settings modal */
+    #settingsOverlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.7);
+      display: none; z-index: 100; align-items: center; justify-content: center;
+      backdrop-filter: blur(4px);
+    }
+    #settingsOverlay.open { display: flex; }
+    #settingsModal {
+      width: min(760px, 95vw); max-height: 90vh; overflow-y: auto;
+      background: #0d1420;
+      border: 1px solid rgba(100,150,200,.3);
+      border-radius: 12px; padding: 24px;
+    }
+    #settingsModal h2 { margin: 0 0 6px; color: #4fb3ff; font-size: 20px; }
+    #settingsModal .subtitle { opacity: 0.6; font-size: 13px; margin-bottom: 20px; }
+    .setting-group {
+      border: 1px solid rgba(100,150,200,.15); border-radius: 8px;
+      padding: 14px; margin-bottom: 12px;
+      transition: border-color .2s;
+    }
+    .setting-group.enabled { border-color: rgba(79,179,255,.3); }
+    .setting-group h3 { margin: 0 0 6px; font-size: 14px; color: #e6edf3; display:flex; align-items:center; gap:8px; flex-wrap: wrap; }
+    .setting-group .desc { font-size: 12px; opacity: 0.7; margin-bottom: 10px; }
+    .setting-group .desc a { color: #4fb3ff; }
+    .enable-row {
+      display: flex; align-items: center; gap: 8px;
+      background: rgba(100,150,200,.08);
+      padding: 8px 10px; border-radius: 4px;
+      margin-bottom: 10px; font-size: 12px; cursor: pointer;
+    }
+    .enable-row input { margin: 0; cursor: pointer; transform: scale(1.2); }
+    .enable-row span { flex: 1; }
+    .setting-group .fields { display: flex; flex-direction: column; gap: 8px; }
+    .setting-group.disabled .fields { opacity: 0.75; }
+    .setting-group label { font-size: 12px; opacity: 0.7; }
+    .setting-group input[type=text], .setting-group input[type=password] {
+      width: 100%; background: #05080d; color: #e6edf3; font-family: monospace;
+      border: 1px solid rgba(100,150,200,.2); border-radius: 4px;
+      padding: 8px; font-size: 13px; box-sizing: border-box;
+    }
+    .setting-group input:focus { outline: none; border-color: #4fb3ff; }
+    .badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+    .badge.required { background: #5c2323; color: #ffb3b3; }
+    .badge.recommended { background: #4a3c0f; color: #ffe08a; }
+    .badge.optional { background: #1e3a5c; color: #8ac6ff; }
+    .badge.free { background: #1e4a2a; color: #8affa0; }
+    .badge.quota { background: #5c2e0e; color: #ffc28a; }
+    .status-pill {
+      display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 10px;
+      background: #333; margin-left: auto;
+    }
+    .status-pill.ok { background: #1e4a2a; color: #8affa0; }
+    .status-pill.err { background: #5c2323; color: #ffb3b3; }
+    .status-pill.pending { background: #4a3c0f; color: #ffe08a; }
+    .status-pill.off { background: #2a2a2a; color: #999; }
+    .status-pill.nokey { background: #3a2e0f; color: #d9a84e; }
+    .setting-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+    .btn {
+      padding: 10px 18px; border-radius: 6px; cursor: pointer; font-size: 13px;
+      border: 1px solid rgba(100,150,200,.3); background: rgba(30,40,55,.7); color: #e6edf3;
+    }
+    .btn.primary { background: #1e5aa0; border-color: #4fb3ff; }
+    .btn:hover { filter: brightness(1.2); }
+    .storage-note { font-size: 11px; opacity: 0.5; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div id="topbar">
+    <svg class="logo-svg" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-label="Ritnalap">
+      <defs>
+        <radialGradient id="tb-orb" cx="50%" cy="45%" r="55%">
+          <stop offset="0%" stop-color="#a8ddff"/>
+          <stop offset="45%" stop-color="#4fb3ff"/>
+          <stop offset="85%" stop-color="#0a3a6a"/>
+          <stop offset="100%" stop-color="#05192e"/>
+        </radialGradient>
+        <linearGradient id="tb-ring" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#4fb3ff"/>
+          <stop offset="100%" stop-color="#1e5aa0"/>
+        </linearGradient>
+      </defs>
+      <circle cx="128" cy="128" r="72" fill="url(#tb-orb)"/>
+      <ellipse cx="108" cy="104" rx="22" ry="12" fill="#fff" opacity="0.35"/>
+      <ellipse cx="128" cy="128" rx="72" ry="30" fill="none" stroke="#a8ddff" stroke-width="2" opacity="0.35"/>
+      <ellipse cx="128" cy="128" rx="30" ry="72" fill="none" stroke="#a8ddff" stroke-width="2" opacity="0.35"/>
+      <ellipse cx="128" cy="128" rx="108" ry="36" fill="none" stroke="url(#tb-ring)" stroke-width="4" opacity="0.85" transform="rotate(-20 128 128)"/>
+      <g transform="rotate(-20 128 128)"><circle cx="236" cy="128" r="8" fill="#ffb347"/></g>
+      <ellipse cx="128" cy="128" rx="100" ry="28" fill="none" stroke="#7bff7b" stroke-width="3" opacity="0.6" transform="rotate(40 128 128)"/>
+      <g transform="rotate(40 128 128)"><circle cx="28" cy="128" r="5" fill="#7bff7b"/></g>
+    </svg>
+    <h1>RITNALAP</h1>
+    <label class="toggle active" id="toggle-aircraft"><input type="checkbox" checked /> <i data-lucide="plane"></i> Avions <span class="count" id="count-aircraft">0</span></label>
+    <label class="toggle active" id="toggle-satellites"><input type="checkbox" checked /> <i data-lucide="satellite"></i> Satellites <span class="count" id="count-satellites">0</span></label>
+    <label class="toggle active" id="toggle-cameras"><input type="checkbox" checked /> <i data-lucide="video"></i> Caméras <span class="count" id="count-cameras">0</span></label>
+    <button id="autoRefreshBtn" title="Activer/désactiver le refresh automatique"><i data-lucide="pause" id="autoRefreshIcon"></i> Auto</button>
+    <button id="settingsBtn"><i data-lucide="settings"></i> Réglages</button>
+    <span id="status">Initialisation…</span>
+  </div>
+
+  <div id="cesiumContainer"></div>
+
+  <div id="sourceSummary">
+    <h4>DÉTAIL DES SOURCES</h4>
+    <div id="sourceList"></div>
+  </div>
+
+  <div id="statusBar">
+    <svg class="sb-logo" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="128" cy="128" r="72" fill="#4fb3ff"/>
+      <ellipse cx="128" cy="128" rx="108" ry="36" fill="none" stroke="#4fb3ff" stroke-width="6" opacity="0.7" transform="rotate(-20 128 128)"/>
+    </svg>
+    <span class="sb-name">RITNALAP</span>
+    <span class="sb-version" id="sbVersion">v…</span>
+    <span class="sb-sep">│</span>
+    <span class="sb-counts">
+      <span><i data-lucide="plane"></i> <b id="sbAircraft">0</b></span>
+      <span><i data-lucide="satellite"></i> <b id="sbSatellites">0</b></span>
+      <span><i data-lucide="video"></i> <b id="sbCameras">0</b></span>
+    </span>
+    <span class="sb-spacer"></span>
+    <span class="sb-alert clickable ok" id="sbAlert">● Tous flux OK</span>
+    <span id="debugBtn" title="Télécharger le log de debug" style="cursor:pointer;opacity:0.5;margin-left:8px;color:#bbb;" onmouseenter="this.style.opacity=0.9" onmouseleave="this.style.opacity=0.5"><i data-lucide="bug" style="width:14px;height:14px;vertical-align:-2px;"></i></span>
+  </div>
+
+  <div id="infoPanel">
+    <span id="closeBtn">✕</span>
+    <div id="infoContent"></div>
+  </div>
+
+  <!-- Settings modal -->
+  <div id="settingsOverlay">
+    <div id="settingsModal">
+      <h2><i data-lucide="settings" style="width:22px;height:22px;vertical-align:-4px;"></i> Réglages — Sources & Clés API</h2>
+      <div class="subtitle">
+        Active/désactive chaque source indépendamment (utile pour ménager les quotas).
+        Les clés sont stockées localement (chiffrées via l'OS quand disponible).
+      </div>
+
+      <div id="settingsGroups"></div>
+
+      <div class="setting-actions">
+        <button class="btn" id="settingsClose">Annuler</button>
+        <button class="btn" id="settingsClear">Tout effacer</button>
+        <button class="btn primary" id="settingsSave">Enregistrer & recharger</button>
+      </div>
+      <div class="storage-note" id="storageNote"></div>
+    </div>
+  </div>
+
+<script>
+// ============================================================
+// DEBUG / SAFE MODE
+// ============================================================
+const URL_PARAMS = new URLSearchParams(location.search);
+const SAFE_MODE = URL_PARAMS.has("safe");
+const NO_CLUSTER = URL_PARAMS.has("nocluster");
+const NO_LABELS = URL_PARAMS.has("nolabels");
+const ONLY_SOURCE = URL_PARAMS.get("only"); // ex: ?only=curated pour ne charger qu'une source
+const DEBUG_LOG = [];
+function dbg(...args) {
+  const line = `[${new Date().toISOString().slice(11,23)}] ` + args.map(a => {
+    if (a instanceof Error) return a.stack || a.message;
+    if (typeof a === "object") { try { return JSON.stringify(a); } catch { return String(a); } }
+    return String(a);
+  }).join(" ");
+  DEBUG_LOG.push(line);
+  if (DEBUG_LOG.length > 500) DEBUG_LOG.shift();
+  console.log(line);
+  const box = document.getElementById("debugBox");
+  if (box) box.textContent = DEBUG_LOG.slice(-60).join("\n");
+}
+function showCrashOverlay(title, detail) {
+  let el = document.getElementById("crashOverlay");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "crashOverlay";
+    el.style.cssText = "position:fixed;top:60px;left:10px;right:10px;max-height:70vh;overflow:auto;background:rgba(40,0,0,.95);border:2px solid #ff5555;color:#fff;padding:12px 16px;z-index:9999;font-family:monospace;font-size:12px;border-radius:6px;";
+    document.body.appendChild(el);
+  }
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <strong style="color:#ff9999;font-size:14px;">⚠ ${title}</strong>
+      <div>
+        <button onclick="downloadDebugLog()" style="margin-right:6px;background:#333;color:#fff;border:1px solid #666;padding:4px 8px;cursor:pointer;">Télécharger log</button>
+        <button onclick="document.getElementById('crashOverlay').remove()" style="background:#333;color:#fff;border:1px solid #666;padding:4px 8px;cursor:pointer;">✕</button>
+      </div>
+    </div>
+    <pre style="white-space:pre-wrap;margin:0;">${String(detail).replace(/</g,"&lt;")}</pre>
+    <div style="margin-top:8px;opacity:.7;">Recharger avec <code>?safe=1</code> dans l'URL pour désactiver toutes les couches.</div>`;
+}
+function downloadDebugLog() {
+  const blob = new Blob([DEBUG_LOG.join("\n")], { type: "text/plain" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "ritnalap-debug-" + Date.now() + ".log";
+  a.click();
+}
+window.downloadDebugLog = downloadDebugLog;
+window.addEventListener("error", (e) => {
+  dbg("window.onerror:", e.message, "at", e.filename + ":" + e.lineno + ":" + e.colno, e.error?.stack || "");
+  showCrashOverlay("Erreur JS : " + e.message, (e.error?.stack || e.message) + "\n\nFichier : " + e.filename + ":" + e.lineno);
+});
+window.addEventListener("unhandledrejection", (e) => {
+  dbg("unhandledrejection:", e.reason?.stack || e.reason);
+  showCrashOverlay("Promise rejetée", e.reason?.stack || String(e.reason));
+});
+dbg("boot; safeMode=", SAFE_MODE, "UA=", navigator.userAgent.slice(0, 80));
+
+// ============================================================
+// CONFIG — stockage abstrait (Electron safeStorage OU localStorage)
+// ============================================================
+const isElectron = !!window.ritnalap?.isElectron;
+
+async function loadStoredConfig() {
+  if (isElectron) {
+    try { return await window.ritnalap.getConfig(); } catch { return {}; }
+  }
+  const out = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k.startsWith("ritnalap.")) out[k.slice(9)] = localStorage.getItem(k);
+  }
+  return out;
+}
+async function saveStoredConfig(cfg) {
+  if (isElectron) return window.ritnalap.saveConfig(cfg);
+  // localStorage fallback
+  for (const k of Object.keys(cfg)) {
+    if (cfg[k] === "" || cfg[k] == null || cfg[k] === false) {
+      localStorage.removeItem("ritnalap." + k);
+    } else {
+      localStorage.setItem("ritnalap." + k, String(cfg[k]));
+    }
+  }
+}
+
+// ============================================================
+// DÉFINITION DES SOURCES
+// ============================================================
+const SOURCES = [
+  { id: "trails", label: "🛤 Trails avions", badge: "optional",
+    desc: "Affiche la trajectoire récente des avions (30 dernières positions). <strong>Expérimental :</strong> peut déclencher des erreurs de rendu Cesium sur certaines configs — désactivé par défaut.",
+    link: null, keys: [],
+    defaultEnabled: false, category: "display",
+  },
+  { id: "countries", label: "🗺 Contours des pays", badge: "optional",
+    desc: "Overlay GeoJSON des frontières nationales. Désactive-le si tu rencontres des erreurs de rendu.",
+    link: null, keys: [],
+    defaultEnabled: false, category: "display",
+  },
+  { id: "cesium", label: "🌍 Cesium Ion", badge: "optional",
+    desc: "Imagerie satellite HD (sinon OpenStreetMap).",
+    link: "https://cesium.com/ion/signup", linkText: "Créer un compte gratuit",
+    keys: [{ name: "CESIUM_ION_TOKEN", label: "Access Token", type: "text" }],
+    defaultEnabled: true, needsKey: "CESIUM_ION_TOKEN", category: "base",
+  },
+  { id: "opensky", label: "✈ OpenSky Network", badge: "quota",
+    desc: "Avions temps réel (ADS-B). <strong>Système de crédits :</strong> anonyme 400/j, enregistré <b>4000/j</b>, contributeur ADS-B 8000/j. Chaque appel global = 4 crédits. Notre cadence auto est calée sur ton quota (voir ci-dessous).<br/>" +
+      "<em>Nouveau :</em> OpenSky utilise maintenant OAuth2 — télécharge le fichier <code>credentials.json</code> depuis ton compte et importe-le ci-dessous (ou remplis les champs à la main).",
+    link: "https://opensky-network.org/index.php?option=com_users&view=registration", linkText: "S'inscrire / télécharger credentials.json",
+    keys: [
+      { name: "OPENSKY_CLIENT_ID", label: "OAuth2 clientId (recommandé)", type: "text" },
+      { name: "OPENSKY_CLIENT_SECRET", label: "OAuth2 clientSecret", type: "password" },
+      { name: "OPENSKY_USER", label: "Utilisateur (legacy Basic Auth — laisser vide si OAuth2)", type: "text" },
+      { name: "OPENSKY_PASS", label: "Mot de passe (legacy)", type: "password" },
+    ],
+    extraHTML: `
+      <div style="margin-top:10px; padding:10px; background:rgba(79,179,255,.08); border-radius:4px;">
+        <label for="openskyFile" style="font-size:12px; cursor:pointer; color:#4fb3ff;">
+          Importer un fichier <code>credentials.json</code> OpenSky
+        </label>
+        <input type="file" id="openskyFile" accept=".json,application/json" style="display:block; margin-top:6px; font-size:11px;" />
+        <div style="font-size:11px; opacity:.6; margin-top:4px;">Le fichier est lu localement, jamais envoyé ailleurs.</div>
+      </div>`,
+    defaultEnabled: true, category: "aircraft",
+  },
+  { id: "celestrak", label: "🛰 CelesTrak", badge: "free",
+    desc: "TLE officiels des satellites actifs. Aucune clé requise.",
+    link: "https://celestrak.org/", linkText: "Site CelesTrak",
+    keys: [],
+    defaultEnabled: true, category: "satellites",
+  },
+  { id: "curated", label: "📹 Webcams curées", badge: "free",
+    desc: "Liste manuelle (Times Square, Tour Eiffel, Shibuya…). Aucune clé.",
+    link: null,
+    keys: [],
+    defaultEnabled: true, category: "cameras",
+  },
+  { id: "windy", label: "📹 Windy Webcams", badge: "quota",
+    desc: "~25 000 webcams mondiales. <strong>Chargement viewport-based</strong> via l'endpoint <code>/map/clusters</code> : 1 requête par pan/zoom au lieu de pagination. Le serveur Windy agrège lui-même les caméras en clusters selon le zoom → charges uniquement ce qui est visible. Quota <strong>10 000 requêtes/j</strong> largement suffisant pour un usage interactif. <em>Lors de la création de la clé sur Windy : choisir <b>Webcams API</b>, laisser <b>Domain restrictions</b> vide, et mettre <b>Ritnalap</b> (ou n'importe quoi) dans <b>Project identification</b>.</em>",
+    link: "https://api.windy.com/webcams", linkText: "Obtenir une clé",
+    keys: [
+      { name: "WINDY_WEBCAMS_KEY", label: "API Key", type: "text" },
+    ],
+    defaultEnabled: false, needsKey: "WINDY_WEBCAMS_KEY", category: "cameras",
+  },
+  { id: "tfl", label: "🚦 Transport for London", badge: "recommended",
+    desc: "~900 caméras trafic Londres. Fonctionne sans clé avec quota réduit.",
+    link: "https://api-portal.tfl.gov.uk/", linkText: "Obtenir une clé",
+    keys: [{ name: "TFL_APP_KEY", label: "app_key (optionnel)", type: "text" }],
+    defaultEnabled: true, category: "cameras",
+  },
+  { id: "caltrans", label: "🚗 Caltrans (Californie)", badge: "free",
+    desc: "Caméras trafic districts 3/4/7. Aucune clé. CORS bypassé dans Electron.",
+    link: "https://cwwp2.dot.ca.gov/vm/iframemap.htm", linkText: "Carte officielle",
+    keys: [],
+    defaultEnabled: true, category: "cameras",
+  },
+  { id: "ny511", label: "🗽 511 NY", badge: "optional",
+    desc: "~900 caméras trafic État de New York. <strong>Tu n'as rien à sélectionner</strong> : sur le portail, demande juste une clé API (self-service gratuit, « Request API Access »). L'app appellera l'endpoint bulk qui renvoie toutes les caméras d'un coup.",
+    link: "https://511ny.org/developers/resources", linkText: "Demander une clé",
+    keys: [{ name: "NY511_KEY", label: "API Key", type: "text" }],
+    defaultEnabled: true, needsKey: "NY511_KEY", category: "cameras",
+  },
+  { id: "wsdot", label: "🌲 Washington State DOT", badge: "optional",
+    desc: "Caméras trafic État de Washington. Clé unique, endpoint bulk — toutes les caméras en un appel.",
+    link: "https://wsdot.wa.gov/traffic/api/", linkText: "Obtenir un AccessCode",
+    keys: [{ name: "WSDOT_KEY", label: "AccessCode", type: "text" }],
+    defaultEnabled: true, needsKey: "WSDOT_KEY", category: "cameras",
+  },
+  { id: "fl511", label: "🌴 Florida 511", badge: "optional",
+    desc: "Caméras trafic Floride. Clé unique, endpoint bulk — toutes les caméras en un appel.",
+    link: "https://fl511.com/developers", linkText: "S'inscrire",
+    keys: [{ name: "FL511_KEY", label: "API Key", type: "text" }],
+    defaultEnabled: true, needsKey: "FL511_KEY", category: "cameras",
+  },
+  { id: "sfbay", label: "🌉 511.org Bay Area", badge: "optional",
+    desc: "Caméras trafic San Francisco Bay. Une clé (token) gratuite est requise, à demander sur leur portail.",
+    link: "https://511.org/open-data/token", linkText: "Demander un token",
+    keys: [{ name: "SFBAY_KEY", label: "API Token", type: "text" }],
+    defaultEnabled: false, needsKey: "SFBAY_KEY", category: "cameras",
+  },
+];
+
+// ============================================================
+// CAMERA ADAPTERS — registre extensible pour agrégateurs externes
+// ============================================================
+// Deux modes supportés :
+//
+// ① One-shot (ex: ASFA — liste fixe, pas de bbox)
+//   {
+//     id, label, desc, link, defaultEnabled,
+//     async fetch()  { return [<cam normalisée>, ...]; }
+//   }
+//
+// ② Viewport-based (ex: WorldCam — tile/bbox, rechargé au pan/zoom)
+//   {
+//     id, label, desc, link, defaultEnabled,
+//     viewportBased: true,
+//     async fetchViewport(north, south, east, west, zoom) {
+//       return [<cam normalisée>, ...];
+//     }
+//   }
+//
+// La forme "camera normalisée" renvoyée par fetch/fetchViewport :
+//   {
+//     name:       string,
+//     lat, lon:   number,
+//     type:       "iframe" | "video" | "mjpeg" | "hls" | "location",
+//     url:        string,           // flux ou iframe
+//     source:     string,           // badge dans le panneau
+//     category:   "traffic"|"city"|"nature"|"port"|undefined,
+//     thumbnail?: string,           // preview JPG affichée dans le panneau
+//   }
+//
+// Ritnalap s'occupe du reste (toggle dans les réglages, ajout à la scène,
+// icône verte, statut, compteurs, debounce viewport). Ajouter un site = 1 objet.
+const CAMERA_ADAPTERS = [];
+
+// State pour les adapters viewport-based : on track leurs entities pour purge
+const _adapterViewportState = new Map(); // id -> { entityIds: Set, lastSig: string, debounce: timer }
+
+function registerCameraAdapter(a) {
+  CAMERA_ADAPTERS.push(a);
+  if (a.viewportBased) {
+    _adapterViewportState.set(a.id, { entityIds: new Set(), lastSig: null, debounce: 0 });
+  }
+  // Propage l'adapter dans SOURCES pour qu'il apparaisse dans les réglages
+  // avec juste un toggle on/off (pas de champ clé sauf si explicitement demandé).
+  SOURCES.push({
+    id: a.id,
+    label: a.label,
+    badge: a.badge || "free",
+    desc: a.desc,
+    link: a.link || null,
+    linkText: a.linkText || (a.link ? "Voir la source" : null),
+    keys: a.keys || [],
+    defaultEnabled: a.defaultEnabled ?? true,
+    needsKey: a.needsKey,
+    category: "cameras",
+  });
+}
+
+// Utilitaire : décode les entités HTML (&egrave;, &apos;, etc.) présentes dans
+// les descriptions de certains flux (notamment ASFA).
+function decodeHtmlEntities(s) {
+  if (!s) return "";
+  const t = document.createElement("textarea"); t.innerHTML = s; return t.value;
+}
+
+// ------------------------------------------------------------
+// Adapter ASFA — caméras autoroutes françaises
+// ------------------------------------------------------------
+// Pipeline réel de autoroutes.fr : 2 requêtes d'authentification renvoyant
+// du JS obfusqué qui reconstruit SAWT3_WebcamDescriptorsLocation.
+// En pratique, l'URL finale est stable sur des mois. On tape directement le
+// descripteur public (JSON-safe), avec fallback dynamique si le hash tourne.
+registerCameraAdapter({
+  id: "asfa",
+  label: "🛣 ASFA (autoroutes FR)",
+  badge: "recommended",
+  desc: "~112 caméras des autoroutes françaises (APRR, Sanef, SAPN, Vinci, Cofiroute, Escota, AREA…) agrégées par l'ASFA via <code>autoroutes.fr</code>. Streams MP4 live + thumbnails rafraîchis toutes les 1–2 min. <strong>Aucune clé</strong>.",
+  link: "https://www.autoroutes.fr/fr/webcams.htm",
+  defaultEnabled: true,
+  async fetch() {
+    // URL résolue via le pipeline d'auth ASFA (sandbox du JS obfusqué).
+    // Le hash de profil (B00658FA) peut tourner — en cas de 404, on relance
+    // le pipeline complet pour en récupérer un nouveau.
+    const CANDIDATES = [
+      "https://wt3.autoroutes-trafic.fr/realtime/webcams/B00658FA/profiles/VIEWSURF/webcams.js",
+    ];
+    let src = null;
+    for (const url of CANDIDATES) {
+      try {
+        const r = await fetch(url);
+        if (r.ok) { src = await r.text(); break; }
+      } catch {}
+    }
+    if (!src) {
+      // Fallback : refaire les 2 phases d'auth pour récupérer un URL frais
+      src = await resolveAsfaDynamic();
+    }
+    // Format : `var markerDescriptors = [...]; at.parseWebcams(markerDescriptors);`
+    const m = src.match(/markerDescriptors\s*=\s*(\[[\s\S]*?\])\s*;/);
+    if (!m) throw new Error("format inattendu");
+    const md = JSON.parse(m[1]);
+    const out = [];
+    for (const entry of md) {
+      const [latlon, , , rawDesc, meta] = entry;
+      if (!latlon || !meta) continue;
+      const [lat, lon] = latlon;
+      if (!isFinite(lat) || !isFinite(lon)) continue;
+      out.push({
+        name: decodeHtmlEntities(rawDesc).slice(0, 160),
+        lat, lon,
+        type: "video",               // mediaRedirect → 302 vers MP4 (CORS ouvert)
+        url: meta.url,
+        source: "ASFA",
+        category: "traffic",
+        thumbnail: meta.thumbnail || null,
+      });
+    }
+    return out;
+  },
+});
+
+// ------------------------------------------------------------
+// Adapter WorldCam — webcams mondiales (viewport-based, tiles)
+// ------------------------------------------------------------
+// worldcam.eu expose un système de tiles JSON identique à Leaflet :
+//   zoom 4-6  → /static/osm/tiles_dots/world/{z}/{x}/{y}.json   (points de densité)
+//   zoom 7-15 → /static/osm/tiles/world/{z}/{x}/{y}.json        (markers individuels)
+// Format : {lat:[int/1e5...], lon:[int/1e5...], id:[int...], t:["slug"...], c:[int...]}
+// Popup HTML : /api/map/webcam/{id}
+// Thumbnails : https://www.worldcam.pl/images/webcams/420x236/{slug}.jpg
+registerCameraAdapter({
+  id: "worldcam",
+  label: "🌍 WorldCam",
+  badge: "free",
+  desc: "~25 000+ webcams mondiales (villes, plages, montagnes, ports, animaux…) via <code>worldcam.eu</code>. <strong>Viewport-based</strong> : les caméras se chargent au pan/zoom, zéro pagination. <strong>Aucune clé</strong>.",
+  link: "https://fr.worldcam.eu/map",
+  defaultEnabled: true,
+  viewportBased: true,
+  async fetchViewport(north, south, east, west, zoom) {
+    // Clamp zoom au range supporté par l'API
+    const z = Math.max(4, Math.min(15, Math.round(zoom)));
+    // Calcule les tiles qui couvrent le viewport
+    const tiles = latLonToTiles(north, south, east, west, z);
+    // Limite le nombre de tiles fetchées pour ne pas saturer
+    if (tiles.length > 30) return []; // trop dézoomé → skip
+    const usePhotoTiles = z >= 7;
+    const base = usePhotoTiles
+      ? "https://fr.worldcam.eu/static/osm/tiles/world"
+      : "https://fr.worldcam.eu/static/osm/tiles_dots/world";
+    const cameras = [];
+    const seen = new Set();
+    await Promise.all(tiles.map(async ({ x, y }) => {
+      try {
+        const r = await fetch(`${base}/${z}/${x}/${y}.json`, {
+          headers: { "X-Requested-With": "XMLHttpRequest" },
+        });
+        if (!r.ok) return;
+        const d = await r.json();
+        const lats = d.lat || [], lons = d.lon || [], ids = d.id || [], slugs = d.t || [];
+        for (let i = 0; i < Math.min(lats.length, lons.length); i++) {
+          const lat = lats[i] / 1e5, lon = lons[i] / 1e5;
+          const id = ids[i] || i;
+          if (seen.has(id)) continue;
+          seen.add(id);
+          const slug = slugs[i] || "";
+          cameras.push({
+            name: slug ? slug.replace(/[-_]/g, " ").slice(0, 80) : `WorldCam #${id}`,
+            lat, lon,
+            type: "iframe",
+            url: `https://fr.worldcam.eu/webcams/detail/${id}`,
+            source: "WorldCam",
+            category: "city",
+            thumbnail: slug
+              ? `https://www.worldcam.pl/images/webcams/420x236/${slug}.jpg`
+              : null,
+            _wcId: id,  // gardé pour popup enrichi au clic
+          });
+        }
+      } catch {}
+    }));
+    return cameras;
+  },
+});
+
+// Utilitaire : calcule la liste de tiles (x, y) à un zoom donné qui couvrent
+// un rectangle géographique. Standard Web Mercator (slippy tiles).
+function latLonToTiles(north, south, east, west, zoom) {
+  const n = Math.pow(2, zoom);
+  const xMin = Math.floor(((west + 180) / 360) * n);
+  const xMax = Math.floor(((east + 180) / 360) * n);
+  const yMin = Math.floor((1 - Math.log(Math.tan(north * Math.PI / 180) + 1 / Math.cos(north * Math.PI / 180)) / Math.PI) / 2 * n);
+  const yMax = Math.floor((1 - Math.log(Math.tan(south * Math.PI / 180) + 1 / Math.cos(south * Math.PI / 180)) / Math.PI) / 2 * n);
+  const tiles = [];
+  for (let x = Math.max(0, xMin); x <= Math.min(n - 1, xMax); x++) {
+    for (let y = Math.max(0, yMin); y <= Math.min(n - 1, yMax); y++) {
+      tiles.push({ x, y });
+    }
+  }
+  return tiles;
+}
+
+// Fallback ASFA : rejoue le pipeline d'auth en 2 requêtes et retourne le texte
+// de webcams.js frais. Uniquement appelé si l'URL cache est en 404.
+async function resolveAsfaDynamic() {
+  const phase1Url = "https://wt3.autoroutes-trafic.fr/authentication/?key=C8L869KN87B6Y7V35V23V32XDF3R2CT3&base=www.autoroutes.fr&div=blocwebtrafic";
+  const p1 = await (await fetch(phase1Url)).text();
+  const keysign = (p1.match(/keysign=([a-f0-9]+)/) || [])[1];
+  const searchIndex = (p1.match(/searchIndex=([A-Z0-9]+)/) || [])[1];
+  if (!keysign || !searchIndex) throw new Error("phase 1 échouée");
+  const phase2Url = `https://wt3.autoroutes-trafic.fr/authentication/?div=blocwebtrafic&keysign=${keysign}&searchIndex=${searchIndex}`;
+  const p2 = await (await fetch(phase2Url)).text();
+  // Exécute phase2 dans un sandbox { document.domain = 'www.autoroutes.fr' }
+  // pour résoudre les branches ternaires qui concatènent l'URL finale.
+  const fakeDoc = { domain: "www.autoroutes.fr" };
+  const stub = "var document=arguments[0]; var WT3_displayMapCallback=function(){};" + p2 + "; return typeof SAWT3_WebcamDescriptorsLocation !== 'undefined' ? SAWT3_WebcamDescriptorsLocation : null;";
+  // eslint-disable-next-line no-new-func
+  const loc = new Function(stub)(fakeDoc);
+  if (!loc) throw new Error("phase 2 échouée (URL non résolue)");
+  const fullUrl = (loc.startsWith("//") ? "https:" + loc : loc) + "webcams.js";
+  const r = await fetch(fullUrl);
+  if (!r.ok) throw new Error("webcams.js HTTP " + r.status);
+  return await r.text();
+}
+
+let CONFIG = {};
+function isEnabled(srcId) {
+  const src = SOURCES.find(s => s.id === srcId);
+  if (!src) return false;
+  const flag = CONFIG["ENABLE_" + srcId.toUpperCase()];
+  const on = (flag === undefined || flag === null || flag === "") ? src.defaultEnabled : (flag === true || flag === "true");
+  if (!on) return false;
+  if (src.needsKey && !CONFIG[src.needsKey]) return false;
+  return true;
+}
+function hasKeyProblem(srcId) {
+  const src = SOURCES.find(s => s.id === srcId);
+  return src?.needsKey && !CONFIG[src.needsKey];
+}
+
+// ============================================================
+// STATUT SOURCES
+// ============================================================
+const sourceStatus = {};
+function setSourceStatus(id, state, note) {
+  sourceStatus[id] = { state, note };
+  renderSourceSummary();
+  const pill = document.getElementById("status-" + id);
+  if (pill) {
+    pill.className = "status-pill " + state;
+    const map = { ok: `✓ ${note || "OK"}`, err: `✗ ${note || "erreur"}`, pending: "…", off: "désactivée", nokey: "pas de clé" };
+    pill.textContent = map[state] || state;
+  }
+}
+function renderSourceSummary() {
+  const list = document.getElementById("sourceList");
+  if (!list) return;
+  const html = SOURCES.map(s => {
+    const st = sourceStatus[s.id] || { state: "pending" };
+    return `<div class="sline"><span class="dot ${st.state}"></span><span class="name">${s.label}</span><span style="opacity:.7">${st.note || ""}</span></div>`;
+  }).join("");
+  list.innerHTML = html;
+  updateStatusBar();
+}
+
+function updateStatusBar() {
+  const alertEl = document.getElementById("sbAlert");
+  if (!alertEl) return;
+  // On ne compte pas les sources désactivées volontairement comme des alertes
+  const active = SOURCES.filter(s => {
+    const st = sourceStatus[s.id];
+    return st && st.state !== "off" && st.state !== "nokey";
+  });
+  const errs = active.filter(s => sourceStatus[s.id]?.state === "err");
+  const pending = active.filter(s => sourceStatus[s.id]?.state === "pending");
+
+  alertEl.classList.remove("ok", "warn");
+  if (errs.length) {
+    alertEl.classList.add("warn");
+    alertEl.innerHTML = `⚠ <b>${errs.length}</b> source${errs.length > 1 ? "s" : ""} KO — cliquer pour détails`;
+  } else if (pending.length) {
+    alertEl.classList.add("warn");
+    alertEl.textContent = `◌ ${pending.length} en cours…`;
+  } else {
+    alertEl.classList.add("ok");
+    alertEl.textContent = `● Tous flux OK (${active.length})`;
+  }
+}
+
+// ============================================================
+// SETTINGS UI — généré dynamiquement
+// ============================================================
+function buildSettingsUI() {
+  const container = document.getElementById("settingsGroups");
+  container.innerHTML = SOURCES.map(s => {
+    const enableKey = "ENABLE_" + s.id.toUpperCase();
+    const storedFlag = CONFIG[enableKey];
+    const enabled = (storedFlag === undefined || storedFlag === null || storedFlag === "") ? s.defaultEnabled : (storedFlag === true || storedFlag === "true");
+    return `
+    <div class="setting-group ${enabled ? "enabled" : "disabled"}" data-source="${s.id}">
+      <h3>${s.label}
+        <span class="badge ${s.badge}">${s.badge.toUpperCase()}</span>
+        <span class="status-pill" id="status-${s.id}"></span>
+      </h3>
+      <div class="desc">${s.desc}${s.link ? ` <a href="${s.link}" target="_blank">${s.linkText} →</a>` : ""}</div>
+      <label class="enable-row">
+        <input type="checkbox" data-enable="${s.id}" ${enabled ? "checked" : ""} />
+        <span>Source activée</span>
+      </label>
+      ${s.keys.length ? `<div class="fields">
+        ${s.keys.map(k => `
+          <label>${k.label}</label>
+          <input type="${k.type}" data-key="${k.name}" value="${escapeHTML(CONFIG[k.name] || "")}" />
+        `).join("")}
+      </div>` : ""}
+      ${s.extraHTML || ""}
+    </div>`;
+  }).join("");
+
+  // Handler spécifique : upload credentials.json OpenSky
+  const fileInput = container.querySelector("#openskyFile");
+  if (fileInput) {
+    fileInput.addEventListener("change", async (e) => {
+      const f = e.target.files?.[0];
+      if (!f) return;
+      try {
+        const text = await f.text();
+        const j = JSON.parse(text);
+        // Clés possibles dans le JSON OpenSky : clientId/clientSecret (OAuth2) ou username/password (legacy)
+        const cid = j.clientId || j.client_id || "";
+        const csecret = j.clientSecret || j.client_secret || "";
+        const user = j.username || j.user || "";
+        const pass = j.password || "";
+        if (cid) container.querySelector('input[data-key="OPENSKY_CLIENT_ID"]').value = cid;
+        if (csecret) container.querySelector('input[data-key="OPENSKY_CLIENT_SECRET"]').value = csecret;
+        if (user) container.querySelector('input[data-key="OPENSKY_USER"]').value = user;
+        if (pass) container.querySelector('input[data-key="OPENSKY_PASS"]').value = pass;
+        alert("Credentials OpenSky importés. Clique Enregistrer pour sauvegarder.");
+      } catch (err) {
+        alert("Fichier invalide : " + err.message);
+      }
+    });
+  }
+
+  // Branchement des toggles activation
+  for (const cb of container.querySelectorAll('input[data-enable]')) {
+    cb.addEventListener("change", (e) => {
+      const grp = e.target.closest(".setting-group");
+      grp.classList.toggle("enabled", e.target.checked);
+      grp.classList.toggle("disabled", !e.target.checked);
+    });
+  }
+}
+
+function escapeHTML(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+const overlay = document.getElementById("settingsOverlay");
+document.getElementById("settingsBtn").onclick = openSettings;
+document.getElementById("settingsClose").onclick = () => overlay.classList.remove("open");
+document.getElementById("settingsSave").onclick = async () => {
+  const newCfg = { ...CONFIG };
+  // clés
+  for (const input of document.querySelectorAll("#settingsModal input[data-key]")) {
+    newCfg[input.dataset.key] = input.value.trim();
+  }
+  // enables
+  for (const cb of document.querySelectorAll("#settingsModal input[data-enable]")) {
+    newCfg["ENABLE_" + cb.dataset.enable.toUpperCase()] = cb.checked;
+  }
+  await saveStoredConfig(newCfg);
+  location.reload();
+};
+document.getElementById("settingsClear").onclick = async () => {
+  if (!confirm("Effacer toutes les clés et réglages ?")) return;
+  const blank = {};
+  for (const k of Object.keys(CONFIG)) blank[k] = "";
+  await saveStoredConfig(blank);
+  location.reload();
+};
+function openSettings() { overlay.classList.add("open"); }
+overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.classList.remove("open"); });
+
+// ============================================================
+// DÉMARRAGE (async parce que config)
+// ============================================================
+let viewer, layers = {};
+const aircraftById = new Map();
+const satellites = [];
+
+(async function boot() {
+  CONFIG = await loadStoredConfig();
+  buildSettingsUI();
+
+  // Version dans la status bar
+  let version = "0.1.0";
+  if (isElectron) {
+    try { version = await window.ritnalap.getVersion(); } catch {}
+  } else {
+    // En mode navigateur, on lit package.json via fetch si possible, sinon fallback statique
+    try {
+      const r = await fetch("package.json");
+      if (r.ok) version = (await r.json()).version || version;
+    } catch {}
+  }
+  document.getElementById("sbVersion").textContent = "v" + version;
+  document.title = `Ritnalap v${version}`;
+
+  // Clic sur l'alerte de la status bar → ouvre le panneau détails
+  const summary = document.getElementById("sourceSummary");
+  document.getElementById("sbAlert").addEventListener("click", () => {
+    summary.classList.toggle("open");
+  });
+  document.addEventListener("click", (e) => {
+    if (!summary.contains(e.target) && !e.target.closest("#sbAlert")) {
+      summary.classList.remove("open");
+    }
+  });
+
+  document.getElementById("storageNote").textContent = isElectron
+    ? "Stockage : fichier chiffré (safeStorage) dans AppData."
+    : "Stockage : localStorage du navigateur.";
+
+  // Init sourceStatus par défaut
+  for (const s of SOURCES) {
+    if (!isEnabled(s.id)) {
+      setSourceStatus(s.id, hasKeyProblem(s.id) ? "nokey" : "off", hasKeyProblem(s.id) ? "pas de clé" : "désactivée");
+    } else {
+      setSourceStatus(s.id, "pending", "…");
+    }
+  }
+
+  // Initialise les icônes Lucide (remplace les <i data-lucide="..."> par les SVG)
+  lucide.createIcons();
+
+  initGlobe();
+  await init();
+})();
+
+// ============================================================
+// GLOBE
+// ============================================================
+function initGlobe() {
+  if (CONFIG.CESIUM_ION_TOKEN && isEnabled("cesium")) {
+    Cesium.Ion.defaultAccessToken = CONFIG.CESIUM_ION_TOKEN;
+  }
+
+  viewer = new Cesium.Viewer("cesiumContainer", {
+    terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+    imageryProvider: (CONFIG.CESIUM_ION_TOKEN && isEnabled("cesium"))
+      ? undefined
+      : new Cesium.UrlTemplateImageryProvider({
+          url: "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
+          credit: "© OpenStreetMap", maximumLevel: 18,
+        }),
+    baseLayerPicker: false, geocoder: false, homeButton: false,
+    sceneModePicker: false, navigationHelpButton: false,
+    timeline: false, animation: false, fullscreenButton: false,
+    infoBox: false, selectionIndicator: false,
+  });
+  viewer.scene.globe.enableLighting = true;
+  viewer.scene.skyAtmosphere.show = true;
+
+  // Capteur des erreurs de rendu Cesium — empêche le freeze total
+  viewer.scene.renderError.addEventListener((scene, error) => {
+    dbg("scene.renderError:", error?.stack || error);
+    showCrashOverlay("Cesium renderError : " + (error?.message || error), error?.stack || String(error));
+    // Tentative de reprise : on relâche l'erreur pour que Cesium redémarre la boucle
+    try { viewer.scene.primitives.removeAll(); } catch {}
+    try { viewer.resize(); } catch {}
+    return true; // signale qu'on l'a géré
+  });
+  dbg("viewer créé, renderError handler actif");
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(2.3522, 48.8566, 15000000),
+    duration: 2,
+  });
+  if (CONFIG.CESIUM_ION_TOKEN && isEnabled("cesium")) {
+    setSourceStatus("cesium", "ok", "HD");
+  } else if (isEnabled("cesium") === false) {
+    setSourceStatus("cesium", "off");
+  } else {
+    setSourceStatus("cesium", "nokey", "OSM fallback");
+  }
+
+  layers.aircraft = new Cesium.CustomDataSource("aircraft");
+  layers.satellites = new Cesium.CustomDataSource("satellites");
+  layers.cameras = new Cesium.CustomDataSource("cameras");
+  Object.values(layers).forEach(l => viewer.dataSources.add(l));
+
+  // Clustering caméras : agrège les points proches selon le zoom
+  const cl = layers.cameras.clustering;
+  cl.enabled = !NO_CLUSTER;
+  if (NO_CLUSTER) dbg("NO_CLUSTER: clustering désactivé");
+  cl.pixelRange = 45;
+  cl.minimumClusterSize = 3;
+  const clusterIconCache = new Map();
+  function clusterIcon(n) {
+    const key = n < 10 ? "s" : n < 100 ? "m" : n < 1000 ? "l" : "xl";
+    if (clusterIconCache.has(key)) return clusterIconCache.get(key);
+    const size = { s: 32, m: 40, l: 48, xl: 58 }[key];
+    // Cluster uniquement sur le layer caméras → couleur = vert (type caméra)
+    const color = { s: "#5fd97a", m: "#3ec45f", l: "#2aa347", xl: "#198235" }[key];
+    const c = document.createElement("canvas");
+    c.width = c.height = size;
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = color; ctx.globalAlpha = 0.85;
+    ctx.beginPath(); ctx.arc(size/2, size/2, size/2 - 2, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1; ctx.strokeStyle = "#000"; ctx.lineWidth = 2; ctx.stroke();
+    const url = c.toDataURL();
+    clusterIconCache.set(key, url);
+    return url;
+  }
+  cl.clusterEvent.addEventListener((entities, cluster) => {
+    cluster.label.show = true;
+    cluster.label.text = entities.length.toLocaleString();
+    cluster.label.font = "bold 12px sans-serif";
+    cluster.label.fillColor = Cesium.Color.BLACK;
+    cluster.label.style = Cesium.LabelStyle.FILL;
+    cluster.label.verticalOrigin = Cesium.VerticalOrigin.CENTER;
+    cluster.label.horizontalOrigin = Cesium.HorizontalOrigin.CENTER;
+    cluster.label.pixelOffset = Cesium.Cartesian2.ZERO;
+    cluster.billboard.show = true;
+    cluster.billboard.image = clusterIcon(entities.length);
+    cluster.billboard.verticalOrigin = Cesium.VerticalOrigin.CENTER;
+    cluster.billboard.horizontalOrigin = Cesium.HorizontalOrigin.CENTER;
+  });
+
+  // Contours des pays / continents (GeoJSON Natural Earth 110m, ~100 KB)
+  if (SAFE_MODE) dbg("SAFE_MODE: loadCountries() sauté");
+  else if (!isEnabled("countries")) { setSourceStatus("countries", "off"); dbg("countries désactivé via réglages"); }
+  else loadCountries();
+
+  setupToggle("aircraft"); setupToggle("satellites"); setupToggle("cameras");
+
+  const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+  handler.setInputAction((click) => {
+    const picked = viewer.scene.pick(click.position);
+    if (!Cesium.defined(picked) || !picked.id || !picked.id.properties) {
+      document.getElementById("infoPanel").style.display = "none"; stopVideo(); return;
+    }
+    const kind = picked.id.properties.kind?.getValue();
+    if (kind === "aircraft") showAircraft(picked.id);
+    else if (kind === "satellite") showSatellite(picked.id);
+    else if (kind === "camera") showCamera(picked.id);
+    else if (kind === "windyCluster") {
+      // Zoom sur le cluster — Windy renverra des clusters plus petits ou des caméras individuelles
+      const lat = picked.id.properties.lat.getValue();
+      const lon = picked.id.properties.lon.getValue();
+      viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(lon, lat, 80000),
+        duration: 0.8,
+      });
+    }
+  }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+  // Rechargement viewport-based sur pan/zoom (debounce 400 ms)
+  // Windy + tous les CAMERA_ADAPTERS viewport-based
+  viewer.camera.moveEnd.addEventListener(() => {
+    if (isEnabled("windy")) scheduleWindyReload();
+    scheduleViewportAdapters();
+  });
+
+  document.getElementById("closeBtn").onclick = () => {
+    document.getElementById("infoPanel").style.display = "none"; stopVideo();
+  };
+}
+
+function setupToggle(key) {
+  const el = document.getElementById(`toggle-${key}`);
+  el.addEventListener("click", (e) => {
+    if (e.target.tagName === "INPUT") return;
+    el.querySelector("input").checked = !el.querySelector("input").checked;
+    e.preventDefault(); applyToggle();
+  });
+  el.querySelector("input").addEventListener("change", applyToggle);
+  function applyToggle() {
+    const checked = el.querySelector("input").checked;
+    el.classList.toggle("active", checked);
+    layers[key].show = checked;
+  }
+}
+function updateCount(key, n) {
+  document.getElementById(`count-${key}`).textContent = n;
+  const sbMap = { aircraft: "sbAircraft", satellites: "sbSatellites", cameras: "sbCameras" };
+  const sb = document.getElementById(sbMap[key]);
+  if (sb) sb.textContent = n;
+}
+function setStatus(s) { document.getElementById("status").textContent = s; }
+
+// ============================================================
+// CONTOURS PAYS (GeoJSON Natural Earth)
+// ============================================================
+async function loadCountries() {
+  try {
+    const url = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson";
+    const r = await fetch(url);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const gj = await r.json();
+
+    // Filtre Antarctique (polygone problématique qui fait planter le rendu Cesium)
+    gj.features = (gj.features || []).filter(f => {
+      const n = (f.properties?.NAME || f.properties?.name || "").toLowerCase();
+      return !n.includes("antarctic");
+    });
+
+    const ds = await Cesium.GeoJsonDataSource.load(gj, {
+      stroke: Cesium.Color.fromCssColorString("#4fb3ff").withAlpha(0.85),
+      fill: Cesium.Color.TRANSPARENT,       // pas de remplissage → pas de tessellation fragile
+      strokeWidth: 1,
+      clampToGround: false,                 // on reste à la surface de l'ellipsoïde, pas de terrain
+    });
+
+    // Désactiver le fill des polygones et activer uniquement le contour
+    for (const e of ds.entities.values) {
+      if (e.polygon) {
+        e.polygon.fill = false;
+        e.polygon.outline = true;
+        e.polygon.outlineColor = Cesium.Color.fromCssColorString("#4fb3ff").withAlpha(0.85);
+        e.polygon.outlineWidth = 1;
+        e.polygon.height = 0;
+      }
+    }
+    viewer.dataSources.add(ds);
+  } catch (err) {
+    console.warn("Countries layer error:", err);
+  }
+}
+
+// ============================================================
+// AVIONS
+// ============================================================
+const TRAIL_LENGTH = 30; // nombre de positions conservées par avion
+const aircraftTrails = new Map(); // icao24 -> [Cartesian3, ...]
+// OAuth2 OpenSky : récupération + cache du bearer token (valide 30 min)
+let openskyToken = null;
+let openskyTokenExpiry = 0;
+async function getOpenSkyToken() {
+  if (!CONFIG.OPENSKY_CLIENT_ID || !CONFIG.OPENSKY_CLIENT_SECRET) return null;
+  if (openskyToken && Date.now() < openskyTokenExpiry - 60_000) return openskyToken;
+  try {
+    const body = new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: CONFIG.OPENSKY_CLIENT_ID,
+      client_secret: CONFIG.OPENSKY_CLIENT_SECRET,
+    });
+    const r = await fetch("https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    if (!r.ok) throw new Error("token HTTP " + r.status);
+    const j = await r.json();
+    openskyToken = j.access_token;
+    openskyTokenExpiry = Date.now() + (j.expires_in || 1800) * 1000;
+    return openskyToken;
+  } catch (err) {
+    console.warn("OpenSky token error:", err);
+    return null;
+  }
+}
+
+async function fetchAircraft() {
+  if (!isEnabled("opensky")) return;
+  try {
+    const headers = {};
+    // Priorité : OAuth2 > Basic Auth legacy > anonyme
+    if (CONFIG.OPENSKY_CLIENT_ID && CONFIG.OPENSKY_CLIENT_SECRET) {
+      const tok = await getOpenSkyToken();
+      if (tok) headers["Authorization"] = "Bearer " + tok;
+    } else if (CONFIG.OPENSKY_USER && CONFIG.OPENSKY_PASS) {
+      headers["Authorization"] = "Basic " + btoa(`${CONFIG.OPENSKY_USER}:${CONFIG.OPENSKY_PASS}`);
+    }
+    const r = await fetch("https://opensky-network.org/api/states/all", { headers });
+    if (r.status === 429) {
+      setSourceStatus("opensky", "err", "quota (429)");
+      CONFIG["ENABLE_OPENSKY"] = false; // session seulement
+      return;
+    }
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const data = await r.json();
+    if (!data.states) return;
+    setSourceStatus("opensky", "ok", `${data.states.length} avions`);
+    const seen = new Set();
+    for (const s of data.states) {
+      const [icao24, callsign, origin, , , lon, lat, baroAlt, onGround, velocity, heading, , , geoAlt] = s;
+      if (lon == null || lat == null) continue;
+      if (!isFinite(lon) || !isFinite(lat) || Math.abs(lat) > 90 || Math.abs(lon) > 180) continue;
+      let alt = geoAlt ?? baroAlt ?? 0;
+      if (!isFinite(alt)) alt = 0;
+      seen.add(icao24);
+      const pos = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
+      if (!pos || !isFinite(pos.x) || !isFinite(pos.y) || !isFinite(pos.z)) continue;
+
+      // Trail : append + cap
+      let trail = aircraftTrails.get(icao24);
+      if (!trail) { trail = []; aircraftTrails.set(icao24, trail); }
+      trail.push(pos);
+      if (trail.length > TRAIL_LENGTH) trail.shift();
+
+      const existing = aircraftById.get(icao24);
+      if (existing) { existing.position = pos; existing.properties.data = s; }
+      else {
+        const e = layers.aircraft.entities.add({
+          id: "ac-" + icao24, position: pos,
+          point: {
+            pixelSize: 8,
+            color: onGround ? Cesium.Color.GRAY : Cesium.Color.fromCssColorString("#4fb3ff"),
+            outlineColor: Cesium.Color.WHITE, outlineWidth: 1,
+          },
+          label: {
+            text: (callsign || icao24).trim(), font: "11px sans-serif",
+            pixelOffset: new Cesium.Cartesian2(0, -18),
+            fillColor: Cesium.Color.WHITE,
+            showBackground: true, backgroundColor: new Cesium.Color(0, 0, 0, 0.5),
+            distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3_000_000),
+            scale: 0.9,
+          },
+          polyline: {
+            show: new Cesium.CallbackProperty(() => {
+              if (!isEnabled("trails")) return false;
+              const t = aircraftTrails.get(icao24);
+              return !!(t && t.length >= 2);
+            }, false),
+            positions: new Cesium.CallbackProperty(() => {
+              const t = aircraftTrails.get(icao24);
+              if (!t || t.length < 2) return undefined;
+              // copie défensive pour éviter mutation pendant le rendu
+              return t.slice();
+            }, false),
+            width: 3,
+            material: Cesium.Color.fromCssColorString("#4fb3ff").withAlpha(0.9),
+            arcType: Cesium.ArcType.NONE, // segments droits — évite les subdivisions géodésiques fragiles
+          },
+          properties: { kind: "aircraft", data: s },
+        });
+        aircraftById.set(icao24, e);
+      }
+    }
+    for (const [id, e] of aircraftById) {
+      if (!seen.has(id)) {
+        layers.aircraft.entities.remove(e);
+        aircraftById.delete(id);
+        aircraftTrails.delete(id);
+      }
+    }
+    updateCount("aircraft", aircraftById.size);
+  } catch (err) {
+    setSourceStatus("opensky", "err", err.message.slice(0, 30));
+  }
+}
+
+// ============================================================
+// SATELLITES
+// ============================================================
+async function loadSatellites() {
+  if (!isEnabled("celestrak")) return;
+  try {
+    const groups = [
+      "https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=tle",
+      "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=tle",
+    ];
+
+    // Cache localStorage (TLE valides ~24h, CelesTrak rate-limite à 429 si trop d'appels)
+    const cacheKey = "ritnalap.tle.cache";
+    const cacheTTL = 12 * 3600 * 1000; // 12h
+    let texts;
+    try {
+      const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
+      if (cached && Date.now() - cached.ts < cacheTTL && cached.texts?.length === groups.length) {
+        texts = cached.texts;
+      }
+    } catch {}
+
+    if (!texts) {
+      // fetch séquentiel + petit délai pour ne pas déclencher le rate-limit
+      texts = [];
+      for (const u of groups) {
+        const r = await fetch(u);
+        if (r.status === 429) {
+          setSourceStatus("celestrak", "err", "quota (429)");
+          // fallback : on réutilise le cache même expiré s'il existe
+          try {
+            const stale = JSON.parse(localStorage.getItem(cacheKey) || "null");
+            if (stale?.texts) { texts = stale.texts; break; }
+          } catch {}
+          return;
+        }
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        texts.push(await r.text());
+        await new Promise(res => setTimeout(res, 400));
+      }
+      localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), texts }));
+    }
+
+    const lines = texts.join("\n").split("\n").map(l => l.trim()).filter(Boolean);
+    const seen = new Set();
+    for (let i = 0; i + 2 < lines.length; i += 3) {
+      const name = lines[i], l1 = lines[i + 1], l2 = lines[i + 2];
+      if (!l1.startsWith("1 ") || !l2.startsWith("2 ")) { i -= 2; continue; }
+      if (seen.has(name)) continue;
+      seen.add(name);
+      try {
+        const satrec = satellite.twoline2satrec(l1, l2);
+        const e = layers.satellites.entities.add({
+          id: "sat-" + name,
+          position: Cesium.Cartesian3.fromDegrees(0, 0, 0),
+          point: { pixelSize: 4, color: Cesium.Color.fromCssColorString("#ffb347") },
+          label: {
+            text: name, font: "10px sans-serif",
+            pixelOffset: new Cesium.Cartesian2(0, -14),
+            fillColor: Cesium.Color.fromCssColorString("#ffb347"),
+            showBackground: true, backgroundColor: new Cesium.Color(0, 0, 0, 0.5),
+            distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 8_000_000),
+            scale: 0.85,
+          },
+          properties: { kind: "satellite", name, tle: [l1, l2] },
+        });
+        satellites.push({ name, satrec, entity: e });
+      } catch {}
+      if (satellites.length >= 2000) break;
+    }
+    updateCount("satellites", satellites.length);
+    setSourceStatus("celestrak", "ok", `${satellites.length} sats`);
+  } catch (err) {
+    setSourceStatus("celestrak", "err", err.message.slice(0, 30));
+  }
+}
+function propagateSatellites() {
+  const now = new Date();
+  const gmst = satellite.gstime(now);
+  for (const s of satellites) {
+    const pv = satellite.propagate(s.satrec, now);
+    if (!pv.position) continue;
+    const geo = satellite.eciToGeodetic(pv.position, gmst);
+    const lon = satellite.degreesLong(geo.longitude);
+    const lat = satellite.degreesLat(geo.latitude);
+    const alt = geo.height * 1000;
+    if (isFinite(lon) && isFinite(lat) && isFinite(alt)) {
+      s.entity.position = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
+    }
+  }
+}
+
+// ============================================================
+// CAMÉRAS
+// ============================================================
+// Couleur unique pour toutes les caméras (type = caméra = vert)
+const CAMERA_GREEN = "#3ec45f";
+const _cameraIconCache = new Map();
+function makeCameraIcon(color = CAMERA_GREEN) {
+  const key = color;
+  if (_cameraIconCache.has(key)) return _cameraIconCache.get(key);
+  const c = document.createElement("canvas");
+  c.width = 40; c.height = 40;
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = color; ctx.strokeStyle = "#000"; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.arc(20, 20, 14, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  // Dessin d'une petite caméra vidéo centrée (pas d'emoji, pur canvas)
+  ctx.fillStyle = "#000";
+  ctx.fillRect(11, 15, 12, 10); // corps
+  ctx.beginPath(); ctx.moveTo(23, 16); ctx.lineTo(29, 13); ctx.lineTo(29, 27);
+  ctx.lineTo(23, 24); ctx.closePath(); ctx.fill(); // objectif
+  const url = c.toDataURL();
+  _cameraIconCache.set(key, url);
+  return url;
+}
+// Location-only : même couleur verte, mais forme carrée (losange via rotation) pour distinguer
+let _locationDotCache = null;
+function makeLocationDot() {
+  if (_locationDotCache) return _locationDotCache;
+  const c = document.createElement("canvas");
+  c.width = 28; c.height = 28;
+  const ctx = c.getContext("2d");
+  ctx.translate(14, 14); ctx.rotate(Math.PI / 4);
+  ctx.fillStyle = CAMERA_GREEN; ctx.strokeStyle = "#000"; ctx.lineWidth = 2;
+  ctx.fillRect(-8, -8, 16, 16); ctx.strokeRect(-8, -8, 16, 16);
+  _locationDotCache = c.toDataURL();
+  return _locationDotCache;
+}
+
+function addCamera(cam) {
+  // garde-fou : lat/lon doivent être finis et dans les bornes
+  const lat = Number(cam.lat), lon = Number(cam.lon);
+  if (!isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return;
+  if (lat === 0 && lon === 0) return; // Null Island = placeholder d'API
+  cam.lat = lat; cam.lon = lon;
+  const isLocationOnly = cam.type === "location";
+  const color = CAMERA_GREEN;
+  layers.cameras.entities.add({
+    id: "cam-" + cam.source + "-" + cam.name + "-" + cam.lat + "-" + cam.lon + "-" + Math.random().toString(36).slice(2, 6),
+    position: Cesium.Cartesian3.fromDegrees(cam.lon, cam.lat, 50),
+    billboard: {
+      image: isLocationOnly ? makeLocationDot() : makeCameraIcon(color),
+      verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+      scale: isLocationOnly ? 1.0 : 1.1,
+    },
+    // Labels permanents uniquement pour les caméras "featured" (curated ~12).
+    // Sur les sources volumineuses (Windy/TfL/Caltrans), 4000+ labels avec
+    // distanceDisplayCondition font exploser le frustum culling Cesium
+    // (RangeError: Invalid array length dans createPotentiallyVisibleSet).
+    // Le nom s'affiche au clic dans le panneau latéral de toute façon.
+    label: (isLocationOnly || NO_LABELS || !cam.featured) ? undefined : {
+      text: cam.name, font: "10px sans-serif",
+      pixelOffset: new Cesium.Cartesian2(0, -26),
+      fillColor: Cesium.Color.fromCssColorString(color),
+      showBackground: true, backgroundColor: new Cesium.Color(0, 0, 0, 0.6),
+      distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1_500_000),
+      scale: 0.85,
+    },
+    properties: { kind: "camera", data: cam },
+  });
+}
+
+const CURATED = [
+  // --- Monde ---
+  { name: "Times Square — NYC", lat: 40.7580, lon: -73.9855, type: "iframe", url: "https://www.earthcam.com/usa/newyork/timessquare/?cam=tsstreet", source: "EarthCam", category: "city" },
+  { name: "Abbey Road — Londres", lat: 51.5320, lon: -0.1779, type: "iframe", url: "https://www.abbeyroad.com/crossing", source: "Abbey Road", category: "city" },
+  { name: "Venise — Rialto", lat: 45.4380, lon: 12.3358, type: "iframe", url: "https://www.skylinewebcams.com/fr/webcam/italia/veneto/venezia/canal-grande.html", source: "Skyline", category: "city" },
+  { name: "Kīlauea — Hawaï", lat: 19.4069, lon: -155.2834, type: "iframe", url: "https://www.youtube.com/embed/AdSDzkZPVpM?autoplay=1", source: "USGS", category: "nature" },
+  { name: "Shibuya — Tokyo", lat: 35.6595, lon: 139.7005, type: "iframe", url: "https://www.youtube.com/embed/3kPH7kTphnE?autoplay=1", source: "YouTube", category: "city" },
+  { name: "Port de Hambourg", lat: 53.5413, lon: 9.9845, type: "iframe", url: "https://www.hafen-hamburg.de/en/webcam/", source: "HHM", category: "port" },
+  { name: "Niagara Falls", lat: 43.0828, lon: -79.0742, type: "iframe", url: "https://www.earthcam.com/canada/niagarafalls/?cam=niagarafalls_str", source: "EarthCam", category: "nature" },
+  { name: "Venice Beach — LA", lat: 33.9850, lon: -118.4695, type: "iframe", url: "https://www.earthcam.com/usa/california/venicebeach/?cam=venicebeach", source: "EarthCam", category: "city" },
+  { name: "Burj Khalifa — Dubaï", lat: 25.1972, lon: 55.2744, type: "iframe", url: "https://www.skylinewebcams.com/fr/webcam/united-arab-emirates/dubai/dubai/burj-khalifa.html", source: "Skyline", category: "city" },
+  { name: "Old Faithful — Yellowstone", lat: 44.4605, lon: -110.8281, type: "iframe", url: "https://www.nps.gov/yell/learn/photosmultimedia/webcams.htm", source: "NPS", category: "nature" },
+  { name: "Reykjavík", lat: 64.1466, lon: -21.9426, type: "iframe", url: "https://www.skylinewebcams.com/fr/webcam/island/reykjavik.html", source: "Skyline", category: "city" },
+
+  // --- France ---
+  { name: "Tour Eiffel — Paris", lat: 48.8584, lon: 2.2945, type: "iframe", url: "https://www.skylinewebcams.com/fr/webcam/france/ile-de-france/paris/tour-eiffel.html", source: "Skyline", category: "city" },
+  { name: "Paris — Montmartre", lat: 48.8867, lon: 2.3431, type: "iframe", url: "https://www.skylinewebcams.com/fr/webcam/france/ile-de-france/paris/paris-montmartre.html", source: "Skyline", category: "city" },
+  { name: "Paris — Arc de Triomphe", lat: 48.8738, lon: 2.2950, type: "iframe", url: "https://www.skylinewebcams.com/fr/webcam/france/ile-de-france/paris/paris-arc-de-triomphe.html", source: "Skyline", category: "city" },
+  { name: "Chamonix — Mont-Blanc", lat: 45.9237, lon: 6.8694, type: "iframe", url: "https://www.skylinewebcams.com/fr/webcam/france/rhone-alpes/haute-savoie/chamonix.html", source: "Skyline", category: "nature" },
+  { name: "Nice — Promenade des Anglais", lat: 43.6946, lon: 7.2653, type: "iframe", url: "https://www.skylinewebcams.com/fr/webcam/france/provence-alpes-cote-dazur/alpes-maritimes/nice.html", source: "Skyline", category: "city" },
+  { name: "Cannes — La Croisette", lat: 43.5510, lon: 7.0167, type: "iframe", url: "https://www.skylinewebcams.com/fr/webcam/france/provence-alpes-cote-dazur/alpes-maritimes/cannes.html", source: "Skyline", category: "city" },
+  { name: "Marseille — Vieux-Port", lat: 43.2950, lon: 5.3744, type: "iframe", url: "https://www.skylinewebcams.com/fr/webcam/france/provence-alpes-cote-dazur/bouches-du-rhone/marseille.html", source: "Skyline", category: "port" },
+  { name: "Saint-Tropez — Port", lat: 43.2720, lon: 6.6400, type: "iframe", url: "https://www.skylinewebcams.com/fr/webcam/france/provence-alpes-cote-dazur/var/saint-tropez.html", source: "Skyline", category: "port" },
+  { name: "Biarritz — Grande Plage", lat: 43.4832, lon: -1.5586, type: "iframe", url: "https://www.skylinewebcams.com/fr/webcam/france/aquitaine/pyrenees-atlantiques/biarritz.html", source: "Skyline", category: "city" },
+  { name: "La Rochelle — Vieux-Port", lat: 46.1591, lon: -1.1522, type: "iframe", url: "https://www.skylinewebcams.com/fr/webcam/france/poitou-charentes/charente-maritime/la-rochelle.html", source: "Skyline", category: "port" },
+  { name: "Étretat — Falaises", lat: 49.7075, lon: 0.2045, type: "iframe", url: "https://www.skylinewebcams.com/fr/webcam/france/haute-normandie/seine-maritime/etretat.html", source: "Skyline", category: "nature" },
+  { name: "Mont Saint-Michel", lat: 48.6361, lon: -1.5115, type: "iframe", url: "https://www.skylinewebcams.com/fr/webcam/france/basse-normandie/manche/mont-saint-michel.html", source: "Skyline", category: "nature" },
+  { name: "Lyon — Fourvière", lat: 45.7624, lon: 4.8225, type: "iframe", url: "https://www.skylinewebcams.com/fr/webcam/france/rhone-alpes/rhone/lyon.html", source: "Skyline", category: "city" },
+  { name: "Bordeaux — Place de la Bourse", lat: 44.8414, lon: -0.5704, type: "iframe", url: "https://www.skylinewebcams.com/fr/webcam/france/aquitaine/gironde/bordeaux.html", source: "Skyline", category: "city" },
+  { name: "Val Thorens — Station", lat: 45.2978, lon: 6.5803, type: "iframe", url: "https://www.skylinewebcams.com/fr/webcam/france/rhone-alpes/savoie/val-thorens.html", source: "Skyline", category: "nature" },
+  { name: "Courchevel", lat: 45.4154, lon: 6.6347, type: "iframe", url: "https://www.skylinewebcams.com/fr/webcam/france/rhone-alpes/savoie/courchevel.html", source: "Skyline", category: "nature" },
+];
+
+async function loadCurated() {
+  if (!isEnabled("curated")) return;
+  for (const c of CURATED) addCamera({ ...c, featured: true });
+  setSourceStatus("curated", "ok", `${CURATED.length}`);
+}
+
+// ------------------------------------------------------------
+// Windy : chargement viewport-based via /map/clusters
+// ------------------------------------------------------------
+// L'endpoint /map/clusters accepte (northLat, southLat, eastLon, westLon, zoom)
+// et renvoie les webcams agrégées côté serveur selon le zoom. Chaque élément a
+// un clusterSize : 1 = webcam isolée, >1 = cluster de N webcams.
+// Contrainte : latSpan <= 22.5° / 2^(zoom-4), lonSpan <= 45° / 2^(zoom-4).
+// Zoom valide : 4..18. Si le viewport est trop large on skippe (vue globale).
+//
+// Une seule requête par moveEnd (debounce 400 ms), cache par signature bbox+zoom
+// pour éviter les refetch inutiles quand la caméra revient sur la même zone.
+
+const windyEntityIds = new Set(); // ids Cesium des entities Windy à purger avant re-render
+let windyLastSig = null;
+let windyDebounce = 0;
+
+function clearWindyEntities() {
+  if (!layers.cameras) return;
+  for (const id of windyEntityIds) {
+    const e = layers.cameras.entities.getById(id);
+    if (e) layers.cameras.entities.remove(e);
+  }
+  windyEntityIds.clear();
+}
+
+function addWindyCamera(w) {
+  const lat = Number(w.location?.latitude), lon = Number(w.location?.longitude);
+  if (!isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return;
+  if (lat === 0 && lon === 0) return;
+  const id = "cam-Windy-" + w.webcamId;
+  if (windyEntityIds.has(id)) return; // évite double-add intra-viewport
+  layers.cameras.entities.add({
+    id,
+    position: Cesium.Cartesian3.fromDegrees(lon, lat, 50),
+    billboard: {
+      image: makeCameraIcon(CAMERA_GREEN),
+      verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+      scale: 1.1,
+    },
+    properties: { kind: "camera", data: {
+      name: w.title || "Webcam", lat, lon, type: "iframe",
+      url: w.urls?.provider || `https://www.windy.com/webcams/${w.webcamId}`,
+      source: "Windy", category: "city",
+    }},
+  });
+  windyEntityIds.add(id);
+}
+
+// Cluster serveur : pastille verte avec compte, clic = zoom sur la zone
+const _windyClusterIconCache = new Map();
+function windyClusterIcon(n) {
+  const key = n < 10 ? "s" : n < 100 ? "m" : n < 1000 ? "l" : "xl";
+  if (_windyClusterIconCache.has(key)) return _windyClusterIconCache.get(key);
+  const size = { s: 34, m: 42, l: 50, xl: 60 }[key];
+  const color = { s: "#5fd97a", m: "#3ec45f", l: "#2aa347", xl: "#198235" }[key];
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = color; ctx.globalAlpha = 0.9;
+  ctx.beginPath(); ctx.arc(size/2, size/2, size/2 - 2, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 1; ctx.strokeStyle = "#000"; ctx.lineWidth = 2; ctx.stroke();
+  const url = c.toDataURL();
+  _windyClusterIconCache.set(key, url);
+  return url;
+}
+
+function addWindyCluster(w) {
+  const lat = Number(w.location?.latitude), lon = Number(w.location?.longitude);
+  if (!isFinite(lat) || !isFinite(lon)) return;
+  const id = "cam-Windy-cluster-" + w.webcamId;
+  if (windyEntityIds.has(id)) return;
+  layers.cameras.entities.add({
+    id,
+    position: Cesium.Cartesian3.fromDegrees(lon, lat, 50),
+    billboard: {
+      image: windyClusterIcon(w.clusterSize),
+      verticalOrigin: Cesium.VerticalOrigin.CENTER,
+      horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+      scale: 1.0,
+    },
+    label: {
+      text: w.clusterSize.toLocaleString(),
+      font: "bold 12px sans-serif",
+      fillColor: Cesium.Color.BLACK,
+      style: Cesium.LabelStyle.FILL,
+      verticalOrigin: Cesium.VerticalOrigin.CENTER,
+      horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+      pixelOffset: Cesium.Cartesian2.ZERO,
+    },
+    // On range un marqueur "cluster" pour que le clic déclenche un zoom plutôt qu'un panneau caméra
+    properties: { kind: "windyCluster", lat, lon },
+  });
+  windyEntityIds.add(id);
+}
+
+// Convertit le viewport Cesium courant en (bbox, zoom) compatibles Windy.
+// Retourne null si la vue est trop large (dézoom > monde entier / continent).
+function computeWindyViewport() {
+  if (!viewer || !viewer.camera) return null;
+  const rect = viewer.camera.computeViewRectangle(viewer.scene.globe.ellipsoid);
+  if (!rect) return null;
+  const north = Cesium.Math.toDegrees(rect.north);
+  const south = Cesium.Math.toDegrees(rect.south);
+  let east = Cesium.Math.toDegrees(rect.east);
+  let west = Cesium.Math.toDegrees(rect.west);
+  const latSpan = north - south;
+  // Gère le cas où le viewport traverse l'antiméridien
+  let lonSpan = east - west;
+  if (lonSpan < 0) lonSpan += 360;
+  if (!isFinite(latSpan) || !isFinite(lonSpan) || latSpan <= 0 || lonSpan <= 0) return null;
+
+  // Zoom Windy : latMax(z) = 22.5 / 2^(z-4)  → z = 4 + log2(22.5 / latSpan)
+  const zLat = 4 + Math.log2(22.5 / latSpan);
+  const zLon = 4 + Math.log2(45 / lonSpan);
+  const zoomRaw = Math.min(zLat, zLon);
+  // Trop dézoomé → skip
+  if (zoomRaw < 4) return { tooWide: true };
+  const zoom = Math.max(4, Math.min(18, Math.floor(zoomRaw)));
+  return { north, south, east, west, zoom, tooWide: false };
+}
+
+async function loadWindy() {
+  if (!isEnabled("windy")) { clearWindyEntities(); return; }
+  if (!CONFIG.WINDY_WEBCAMS_KEY) { setSourceStatus("windy", "err", "pas de clé"); return; }
+  const vp = computeWindyViewport();
+  if (!vp) return;
+  if (vp.tooWide) {
+    clearWindyEntities();
+    setSourceStatus("windy", "ok", "zoom in pour charger");
+    return;
+  }
+  // Signature pour éviter de rejouer la même requête
+  const sig = [vp.north.toFixed(2), vp.south.toFixed(2), vp.east.toFixed(2), vp.west.toFixed(2), vp.zoom].join("|");
+  if (sig === windyLastSig) return;
+  windyLastSig = sig;
+  setSourceStatus("windy", "pending");
+  try {
+    const url = `https://api.windy.com/webcams/api/v3/map/clusters?northLat=${vp.north}&southLat=${vp.south}&eastLon=${vp.east}&westLon=${vp.west}&zoom=${vp.zoom}&include=location,urls`;
+    const r = await fetch(url, { headers: { "x-windy-api-key": CONFIG.WINDY_WEBCAMS_KEY } });
+    if (r.status === 429) { setSourceStatus("windy", "err", "quota épuisé"); return; }
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json();
+    const list = j.webcams || [];
+    clearWindyEntities();
+    let camCount = 0, clusterCount = 0, aggregated = 0;
+    for (const w of list) {
+      if ((w.clusterSize || 1) > 1) { addWindyCluster(w); clusterCount++; aggregated += w.clusterSize; }
+      else { addWindyCamera(w); camCount++; }
+    }
+    const status = clusterCount
+      ? `${camCount} + ${clusterCount} clusters (~${aggregated})`
+      : `${camCount}`;
+    setSourceStatus("windy", "ok", status);
+    dbg(`windy viewport: z=${vp.zoom}, ${camCount} cams + ${clusterCount} clusters`);
+  } catch (e) { setSourceStatus("windy", "err", e.message.slice(0, 30)); windyLastSig = null; }
+}
+
+function scheduleWindyReload() {
+  clearTimeout(windyDebounce);
+  windyDebounce = setTimeout(loadWindy, 400);
+}
+
+async function loadTfL() {
+  if (!isEnabled("tfl")) return;
+  setSourceStatus("tfl", "pending");
+  try {
+    const suffix = CONFIG.TFL_APP_KEY ? `?app_key=${CONFIG.TFL_APP_KEY}` : "";
+    const r = await fetch(`https://api.tfl.gov.uk/Place/Type/JamCam${suffix}`);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const list = await r.json();
+    let total = 0;
+    for (const cam of list) {
+      const props = Object.fromEntries((cam.additionalProperties || []).map(p => [p.key, p.value]));
+      const video = props.videoUrl || props.imageUrl;
+      addCamera({
+        name: cam.commonName, lat: cam.lat, lon: cam.lon,
+        type: video && video.endsWith(".mp4") ? "video" : (video && video.endsWith(".jpg") ? "mjpeg" : "iframe"),
+        url: video || "https://www.tfl.gov.uk/traffic/status/",
+        source: "TfL", category: "traffic",
+      });
+      total++;
+    }
+    setSourceStatus("tfl", "ok", `${total}`);
+  } catch (e) { setSourceStatus("tfl", "err", e.message.slice(0, 30)); }
+}
+
+async function loadCaltrans() {
+  if (!isEnabled("caltrans")) return;
+  setSourceStatus("caltrans", "pending");
+  try {
+    const districts = ["d3", "d4", "d7", "d8", "d11", "d12"];
+    let total = 0;
+    for (const d of districts) {
+      try {
+        const r = await fetch(`https://cwwp2.dot.ca.gov/data/${d}/cctv/cctvStatusD${d.slice(1).padStart(2, "0")}.json`);
+        if (!r.ok) continue;
+        const j = await r.json();
+        for (const c of (j.data || [])) {
+          const cc = c.cctv || c;
+          const loc = cc.location;
+          const img = cc.imageData?.static?.currentImageURL || cc.imageData?.streamingVideoURL;
+          if (!loc?.latitude || !loc?.longitude || !img) continue;
+          addCamera({
+            name: loc.locationName || "Caltrans " + d.toUpperCase(),
+            lat: +loc.latitude, lon: +loc.longitude,
+            type: img.endsWith(".m3u8") ? "hls" : (img.endsWith(".mp4") ? "video" : "mjpeg"),
+            url: img, source: "Caltrans", category: "traffic",
+          });
+          total++;
+        }
+      } catch {}
+    }
+    setSourceStatus("caltrans", total ? "ok" : "err", total ? `${total}` : "0 (CORS?)");
+  } catch (e) { setSourceStatus("caltrans", "err", e.message.slice(0, 30)); }
+}
+
+async function loadNY511() {
+  if (!isEnabled("ny511")) return;
+  setSourceStatus("ny511", "pending");
+  try {
+    const r = await fetch(`https://511ny.org/api/getcameras?key=${CONFIG.NY511_KEY}&format=json`);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const list = await r.json();
+    let total = 0;
+    for (const c of list) {
+      if (!c.Latitude || !c.Longitude) continue;
+      addCamera({
+        name: c.Name || "511NY", lat: +c.Latitude, lon: +c.Longitude,
+        type: "mjpeg", url: c.Url, source: "511NY", category: "traffic",
+      });
+      total++;
+    }
+    setSourceStatus("ny511", "ok", `${total}`);
+  } catch (e) { setSourceStatus("ny511", "err", e.message.slice(0, 30)); }
+}
+
+async function loadWSDOT() {
+  if (!isEnabled("wsdot")) return;
+  setSourceStatus("wsdot", "pending");
+  try {
+    const r = await fetch(`https://wsdot.wa.gov/Traffic/api/HighwayAlerts/HighwayAlertsREST.svc/GetCamerasAsJson?AccessCode=${CONFIG.WSDOT_KEY}`);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const list = await r.json();
+    let total = 0;
+    for (const c of list) {
+      if (!c.CameraLocation) continue;
+      addCamera({
+        name: c.Title || "WSDOT",
+        lat: c.CameraLocation.Latitude, lon: c.CameraLocation.Longitude,
+        type: "mjpeg", url: c.ImageURL, source: "WSDOT", category: "traffic",
+      });
+      total++;
+    }
+    setSourceStatus("wsdot", "ok", `${total}`);
+  } catch (e) { setSourceStatus("wsdot", "err", e.message.slice(0, 30)); }
+}
+
+async function loadFL511() {
+  if (!isEnabled("fl511")) return;
+  setSourceStatus("fl511", "pending");
+  try {
+    const r = await fetch(`https://fl511.com/api/v2/get/cameras?key=${CONFIG.FL511_KEY}`);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const list = await r.json();
+    let total = 0;
+    for (const c of list) {
+      if (!c.location) continue;
+      addCamera({
+        name: c.name || "FL511",
+        lat: c.location.latitude, lon: c.location.longitude,
+        type: "mjpeg", url: c.videoUrl || c.imageUrl,
+        source: "FL511", category: "traffic",
+      });
+      total++;
+    }
+    setSourceStatus("fl511", "ok", `${total}`);
+  } catch (e) { setSourceStatus("fl511", "err", e.message.slice(0, 30)); }
+}
+
+async function loadSFBay() {
+  if (!isEnabled("sfbay")) return;
+  if (!CONFIG.SFBAY_KEY) { setSourceStatus("sfbay", "nokey", "pas de clé"); return; }
+  setSourceStatus("sfbay", "pending");
+  try {
+    const r = await fetch(`https://api.511.org/traffic/cameras?api_key=${CONFIG.SFBAY_KEY}&format=json`);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json();
+    let total = 0;
+    for (const c of (j.cameras || [])) {
+      if (!c.location) continue;
+      addCamera({
+        name: c.name, lat: c.location.lat, lon: c.location.lng,
+        type: "mjpeg", url: c.views?.[0]?.url, source: "511.org", category: "traffic",
+      });
+      total++;
+    }
+    setSourceStatus("sfbay", "ok", `${total}`);
+  } catch (e) { setSourceStatus("sfbay", "err", e.message.slice(0, 30)); }
+}
+
+// Runner générique pour les CAMERA_ADAPTERS one-shot : respecte le toggle,
+// gère le statut, convertit les cam normalisées en entities Cesium via addCamera().
+async function runCameraAdapter(adapter) {
+  if (adapter.viewportBased) {
+    // Les adapters viewport-based sont gérés par runViewportAdapter() sur moveEnd.
+    // Au boot, on fait un premier appel si le viewport est exploitable.
+    await runViewportAdapter(adapter);
+    return;
+  }
+  if (!isEnabled(adapter.id)) return;
+  setSourceStatus(adapter.id, "pending");
+  try {
+    const list = await adapter.fetch();
+    let total = 0;
+    for (const cam of list) {
+      if (!cam || !isFinite(cam.lat) || !isFinite(cam.lon)) continue;
+      addCamera(cam);
+      total++;
+    }
+    setSourceStatus(adapter.id, "ok", `${total}`);
+  } catch (e) {
+    setSourceStatus(adapter.id, "err", (e.message || "err").slice(0, 30));
+  }
+}
+
+// Runner pour les adapters viewport-based. Appelé au boot + sur moveEnd.
+// Gère la purge des anciennes entities, la signature anti-refetch,
+// et le debounce (400 ms post-moveEnd).
+function clearAdapterEntities(adapterId) {
+  const state = _adapterViewportState.get(adapterId);
+  if (!state || !layers.cameras) return;
+  for (const id of state.entityIds) {
+    const e = layers.cameras.entities.getById(id);
+    if (e) layers.cameras.entities.remove(e);
+  }
+  state.entityIds.clear();
+}
+
+function addAdapterEntity(adapterId, cam) {
+  const state = _adapterViewportState.get(adapterId);
+  if (!state) return;
+  const id = `cam-${adapterId}-${cam._wcId || cam.name}-${cam.lat}-${cam.lon}`;
+  if (state.entityIds.has(id)) return;
+  layers.cameras.entities.add({
+    id,
+    position: Cesium.Cartesian3.fromDegrees(cam.lon, cam.lat, 50),
+    billboard: {
+      image: makeCameraIcon(CAMERA_GREEN),
+      verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+      scale: 1.1,
+    },
+    properties: { kind: "camera", data: cam },
+  });
+  state.entityIds.add(id);
+}
+
+async function runViewportAdapter(adapter) {
+  if (!isEnabled(adapter.id)) { clearAdapterEntities(adapter.id); return; }
+  if (!viewer || !viewer.camera) return;
+  const rect = viewer.camera.computeViewRectangle(viewer.scene.globe.ellipsoid);
+  if (!rect) return;
+  const north = Cesium.Math.toDegrees(rect.north);
+  const south = Cesium.Math.toDegrees(rect.south);
+  const east = Cesium.Math.toDegrees(rect.east);
+  const west = Cesium.Math.toDegrees(rect.west);
+  const latSpan = north - south;
+  let lonSpan = east - west; if (lonSpan < 0) lonSpan += 360;
+  if (!isFinite(latSpan) || !isFinite(lonSpan) || latSpan <= 0) return;
+
+  // Estimation du zoom Web Mercator à partir du span (heuristique)
+  const zoom = Math.max(4, Math.min(15, Math.round(Math.log2(360 / Math.max(lonSpan, 0.01)))));
+
+  // Signature pour éviter les refetch sur la même zone
+  const state = _adapterViewportState.get(adapter.id);
+  const sig = [north.toFixed(1), south.toFixed(1), east.toFixed(1), west.toFixed(1), zoom].join("|");
+  if (state.lastSig === sig) return;
+  state.lastSig = sig;
+
+  setSourceStatus(adapter.id, "pending");
+  try {
+    const list = await adapter.fetchViewport(north, south, east, west, zoom);
+    clearAdapterEntities(adapter.id);
+    let total = 0;
+    for (const cam of list) {
+      if (!cam || !isFinite(cam.lat) || !isFinite(cam.lon)) continue;
+      addAdapterEntity(adapter.id, cam);
+      total++;
+    }
+    setSourceStatus(adapter.id, "ok", `${total}`);
+    dbg(`${adapter.id} viewport: z=${zoom}, ${total} cams`);
+  } catch (e) {
+    setSourceStatus(adapter.id, "err", (e.message || "err").slice(0, 30));
+    state.lastSig = null;
+  }
+}
+
+function scheduleViewportAdapters() {
+  for (const adapter of CAMERA_ADAPTERS) {
+    if (!adapter.viewportBased) continue;
+    const state = _adapterViewportState.get(adapter.id);
+    if (!state) continue;
+    clearTimeout(state.debounce);
+    state.debounce = setTimeout(() => {
+      if (isEnabled(adapter.id)) runViewportAdapter(adapter);
+    }, 400);
+  }
+}
+
+async function loadCameras() {
+  // Cache le layer pendant l'insertion pour éviter que Cesium rende des états
+  // intermédiaires pendant que les billboards arrivent par vagues
+  // (cause du RangeError: Invalid array length dans createPotentiallyVisibleSet).
+  const wantCluster = !NO_CLUSTER;
+  const prevShow = layers.cameras?.show !== false;
+  if (layers.cameras) {
+    layers.cameras.show = false;
+    dbg("loadCameras: layer caché pendant l'insertion");
+  }
+  if (layers.cameras?.clustering && wantCluster) {
+    layers.cameras.clustering.enabled = false;
+    dbg("loadCameras: clustering DÉSACTIVÉ pendant l'insertion");
+  }
+
+  // Chargement séquentiel avec log pour isoler la source qui crashe Cesium.
+  // Les sources builtin sont listées explicitement ; les CAMERA_ADAPTERS
+  // (registrés dynamiquement) sont ajoutés à la fin via un wrapper générique.
+  const steps = [
+    ["curated",        loadCurated],
+    ["windy",          loadWindy],
+    ["tfl",            loadTfL],
+    ["caltrans",       loadCaltrans],
+    ["ny511",          loadNY511],
+    ["wsdot",          loadWSDOT],
+    ["fl511",          loadFL511],
+    ["sfbay",          loadSFBay],
+  ];
+  for (const adapter of CAMERA_ADAPTERS) {
+    steps.push([adapter.id, () => runCameraAdapter(adapter)]);
+  }
+  for (const [name, fn] of steps) {
+    if (ONLY_SOURCE && name !== ONLY_SOURCE) { dbg("ONLY_SOURCE: skip", name); continue; }
+    const before = layers.cameras.entities.values.length;
+    dbg("loadCameras →", name, "start (entities avant:", before, ")");
+    try {
+      await fn();
+      // Laisse Cesium rendre 2 frames avant de passer à la suivante, pour que le crash se manifeste ici
+      await new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
+      const after = layers.cameras.entities.values.length;
+      dbg("loadCameras ←", name, "OK (+", after - before, "entities, total:", after + ")");
+    } catch (e) {
+      dbg("loadCameras ← ERR sur", name, ":", e);
+    }
+  }
+  updateCount("cameras", layers.cameras.entities.values.length);
+
+  // Rebranche le clustering maintenant que toutes les entities sont en place
+  if (layers.cameras?.clustering && wantCluster) {
+    // Laisse Cesium digérer la dernière insertion avant de réactiver le clustering
+    await new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
+    try {
+      layers.cameras.clustering.enabled = true;
+      dbg("loadCameras: clustering RÉACTIVÉ sur", layers.cameras.entities.values.length, "entities");
+    } catch (e) {
+      dbg("loadCameras: échec réactivation clustering:", e);
+    }
+  }
+  // Réaffiche le layer
+  if (layers.cameras && prevShow) {
+    await new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
+    layers.cameras.show = true;
+    dbg("loadCameras: layer réaffiché");
+  }
+}
+
+// ============================================================
+// CLIC & INFOS
+// ============================================================
+let currentVideoCleanup = null;
+function stopVideo() { if (currentVideoCleanup) { currentVideoCleanup(); currentVideoCleanup = null; } }
+
+function showAircraft(entity) {
+  stopVideo();
+  const d = entity.properties.data.getValue();
+  const [icao24, callsign, origin, , , lon, lat, baroAlt, onGround, velocity, heading, , , geoAlt] = d;
+  document.getElementById("infoContent").innerHTML = `
+    <h2><i data-lucide="plane" style="width:18px;height:18px;vertical-align:-3px;"></i> ${callsign?.trim() || icao24}</h2>
+    <div class="row"><span class="label">ICAO24</span><span>${icao24}</span></div>
+    <div class="row"><span class="label">Pays</span><span>${origin || "—"}</span></div>
+    <div class="row"><span class="label">Position</span><span>${lat?.toFixed(3)}, ${lon?.toFixed(3)}</span></div>
+    <div class="row"><span class="label">Altitude</span><span>${geoAlt ? Math.round(geoAlt) + " m" : "—"}</span></div>
+    <div class="row"><span class="label">Vitesse</span><span>${velocity ? Math.round(velocity * 3.6) + " km/h" : "—"}</span></div>
+    <div class="row"><span class="label">Cap</span><span>${heading ? Math.round(heading) + "°" : "—"}</span></div>
+    <div class="row"><span class="label">Au sol</span><span>${onGround ? "Oui" : "Non"}</span></div>
+    <div style="margin-top:10px"><a href="https://globe.adsbexchange.com/?icao=${icao24}" target="_blank" style="color:#4fb3ff">Itinéraire ADS-B Exchange →</a></div>`;
+  document.getElementById("infoPanel").style.display = "block";
+  lucide.createIcons();
+}
+
+function showSatellite(entity) {
+  stopVideo();
+  const name = entity.properties.name.getValue();
+  const tle = entity.properties.tle.getValue();
+  const pos = entity.position.getValue(viewer.clock.currentTime);
+  const carto = Cesium.Cartographic.fromCartesian(pos);
+  document.getElementById("infoContent").innerHTML = `
+    <h2><i data-lucide="satellite" style="width:18px;height:18px;vertical-align:-3px;"></i> ${name}</h2>
+    <div class="row"><span class="label">Latitude</span><span>${Cesium.Math.toDegrees(carto.latitude).toFixed(3)}°</span></div>
+    <div class="row"><span class="label">Longitude</span><span>${Cesium.Math.toDegrees(carto.longitude).toFixed(3)}°</span></div>
+    <div class="row"><span class="label">Altitude</span><span>${(carto.height/1000).toFixed(1)} km</span></div>
+    <details style="margin-top:10px; font-size:11px;"><summary style="cursor:pointer">TLE</summary>
+      <pre style="white-space:pre-wrap; word-break:break-all; background:#000; padding:8px; border-radius:4px; font-size:10px;">${tle[0]}\n${tle[1]}</pre></details>
+    <div style="margin-top:10px"><a href="https://www.n2yo.com/?s=${encodeURIComponent(name)}" target="_blank" style="color:#4fb3ff">Détails N2YO →</a></div>`;
+  document.getElementById("infoPanel").style.display = "block";
+  lucide.createIcons();
+}
+
+function showCamera(entity) {
+  stopVideo();
+  const cam = entity.properties.data.getValue();
+  let media = "";
+  if (cam.type === "location") {
+    media = `<div style="margin-top:10px; padding:10px; background:rgba(136,136,136,.15); border-radius:4px; font-size:12px; color:#bbb;">
+      📍 <strong>Position uniquement</strong> — ce portail OpenData publie les emplacements des caméras mais pas de flux vidéo public.
+    </div>`;
+  } else if (cam.type === "hls") {
+    media = `<video id="camvid" controls autoplay muted playsinline></video>`;
+  } else if (cam.type === "video") {
+    // Si l'adapter fournit un thumbnail, on l'affiche en poster (visible le temps
+    // que la vidéo charge, et en fallback si le MP4 est inaccessible).
+    const poster = cam.thumbnail ? ` poster="${cam.thumbnail}"` : "";
+    media = `<video controls autoplay muted playsinline src="${cam.url}"${poster} style="width:100%; border-radius:4px; margin-top:10px"></video>
+             <div style="margin-top:6px;"><a href="${cam.url}" target="_blank" style="color:#4fb3ff; font-size:12px">Ouvrir le flux →</a></div>`;
+  } else if (cam.type === "mjpeg") {
+    media = `<img src="${cam.url}" style="width:100%; border-radius:4px; margin-top:10px" onerror="this.style.display='none'" />
+             <div style="margin-top:6px;"><a href="${cam.url}" target="_blank" style="color:#4fb3ff; font-size:12px">Ouvrir directement →</a></div>`;
+  } else {
+    const thumb = cam.thumbnail
+      ? `<img src="${cam.thumbnail}" style="width:100%; border-radius:4px; margin-top:10px" onerror="this.style.display='none'" />`
+      : "";
+    media = `${thumb}
+             <iframe src="${cam.url}" style="width:100%; height:220px; border:0; border-radius:4px; margin-top:10px" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+             <div style="margin-top:6px;"><a href="${cam.url}" target="_blank" style="color:#4fb3ff; font-size:12px">Plein écran →</a></div>`;
+  }
+  document.getElementById("infoContent").innerHTML = `
+    <h2><i data-lucide="video" style="width:18px;height:18px;vertical-align:-3px;"></i> ${cam.name}</h2>
+    <div class="row"><span class="label">Source</span><span>${cam.source}</span></div>
+    <div class="row"><span class="label">Catégorie</span><span>${cam.category || "—"}</span></div>
+    <div class="row"><span class="label">Position</span><span>${cam.lat.toFixed(3)}, ${cam.lon.toFixed(3)}</span></div>
+    ${media}`;
+  document.getElementById("infoPanel").style.display = "block";
+  lucide.createIcons();
+
+  if (cam.type === "hls") {
+    const v = document.getElementById("camvid");
+    if (Hls.isSupported()) {
+      const hls = new Hls(); hls.loadSource(cam.url); hls.attachMedia(v);
+      currentVideoCleanup = () => hls.destroy();
+    } else if (v.canPlayType("application/vnd.apple.mpegurl")) {
+      v.src = cam.url;
+    }
+  }
+}
+
+// ============================================================
+// INIT FLUX
+// ============================================================
+// Refresh interne (utilisé par l'auto-refresh)
+let refreshing = false;
+async function refreshAll() {
+  if (refreshing) return;
+  refreshing = true;
+  setStatus("Rafraîchissement…");
+  try {
+    layers.cameras.entities.removeAll();
+    await Promise.all([
+      fetchAircraft(),
+      loadSatellites(),
+      loadCameras(),
+    ]);
+    setStatus("Flux rafraîchis à " + new Date().toLocaleTimeString());
+  } finally {
+    refreshing = false;
+  }
+}
+
+// Gestion de l'auto-refresh (pause/reprise sans recharger la page)
+const autoTimers = [];
+let autoRefreshOn = true;
+
+function startAutoRefresh() {
+  stopAutoRefresh(); // clean
+  // Cadence OpenSky calée sur le système de crédits (chaque appel global = 4 crédits) :
+  //   - OAuth2 / Basic Auth : 4000 crédits/j → 1000 appels/j → 1 toutes les ~90s (on met 100s pour garder une marge)
+  //   - Anonyme : 400 crédits/j → 100 appels/j → au mieux 1 toutes les ~15 min (inutilisable)
+  const hasAuth = (CONFIG.OPENSKY_CLIENT_ID && CONFIG.OPENSKY_CLIENT_SECRET)
+               || (CONFIG.OPENSKY_USER && CONFIG.OPENSKY_PASS);
+  const aircraftInterval = hasAuth ? 100_000 : 900_000;
+  autoTimers.push(setInterval(fetchAircraft, aircraftInterval));
+  autoTimers.push(setInterval(propagateSatellites, 1000));
+  autoTimers.push(setInterval(loadSatellites, 6 * 3600 * 1000));
+  autoTimers.push(setInterval(loadCameras, 30 * 60 * 1000));
+}
+function stopAutoRefresh() {
+  while (autoTimers.length) clearInterval(autoTimers.pop());
+}
+function updateAutoBtn() {
+  const btn = document.getElementById("autoRefreshBtn");
+  if (autoRefreshOn) {
+    btn.classList.remove("paused");
+    btn.innerHTML = '<i data-lucide="pause"></i> Auto';
+    btn.title = "Désactiver le refresh automatique (actuellement actif)";
+  } else {
+    btn.classList.add("paused");
+    btn.innerHTML = '<i data-lucide="play"></i> Auto';
+    btn.title = "Réactiver le refresh automatique (actuellement en pause)";
+  }
+  lucide.createIcons({ attrs: { class: "" }, nameAttr: "data-lucide" });
+}
+
+async function init() {
+  if (SAFE_MODE) {
+    setStatus("⚠ SAFE MODE actif — aucune couche chargée. Recharger sans ?safe=1 pour activer.");
+    dbg("SAFE_MODE: init() ne charge aucune couche");
+    return;
+  }
+  setStatus("Chargement des flux…");
+  // Charge les couches une par une pour isoler celle qui crashe
+  dbg("init: fetchAircraft…");
+  try { await fetchAircraft(); dbg("init: fetchAircraft OK"); } catch (e) { dbg("fetchAircraft ERR:", e); }
+  dbg("init: loadSatellites…");
+  try { await loadSatellites(); dbg("init: loadSatellites OK"); } catch (e) { dbg("loadSatellites ERR:", e); }
+  dbg("init: loadCameras…");
+  try { await loadCameras(); dbg("init: loadCameras OK"); } catch (e) { dbg("loadCameras ERR:", e); }
+  setStatus("Flux temps réel actifs");
+
+  propagateSatellites();
+  startAutoRefresh();
+  updateAutoBtn();
+
+  document.getElementById("debugBtn").addEventListener("click", downloadDebugLog);
+  document.getElementById("autoRefreshBtn").addEventListener("click", () => {
+    autoRefreshOn = !autoRefreshOn;
+    if (autoRefreshOn) {
+      startAutoRefresh();
+      setStatus("Auto-refresh réactivé");
+    } else {
+      stopAutoRefresh();
+      setStatus("Auto-refresh en pause");
+    }
+    updateAutoBtn();
+  });
+}
+</script>
+</body>
+</html>
